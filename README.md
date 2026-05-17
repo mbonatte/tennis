@@ -35,7 +35,7 @@ Useful command-line options:
 - `homography.py`: chooses the best court homography from detected keypoints.
 - `postprocess.py`: refines detected court keypoints using local line intersections.
 - `player.py`: player bounding-box tracking, pose tracking, and hybrid player annotation.
-- `analysis.py`: scene cuts, reference-style shot events, projected speeds, player stats, JSON export, and stats overlay.
+- `analysis.py`: scene cuts, reference-style shot events, bounce in/out calls, projected speeds, player stats, JSON export, and stats overlay.
 - `analysis_stats.json`: latest generated match statistics.
 - `.cache/`: cached model predictions for faster repeated runs.
 - `REFERENCE_COMPARISON.md`: notes about what the reference projects include and what is still missing here.
@@ -52,3 +52,5 @@ Useful switches:
 - Set `input_path=PROJECT_ROOT / "your_video.mp4"` to analyze another file.
 
 Shot frames use the reference repo's sustained vertical trajectory-change heuristic adapted to TrackNet center points. Speed and player statistics are still heuristic estimates from monocular video, so treat them as debug analytics until they are validated against labeled match events.
+
+Bounce calls in `analysis_stats.json` use different rules for serve and rally play: the first bounce after the first shot is checked against the opposite service boxes, while later game bounces are checked against the full singles court.

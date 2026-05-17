@@ -19,6 +19,17 @@ class ShotEvent:
 
 
 @dataclass(frozen=True)
+class BounceEvent:
+    frame: int
+    phase: str
+    in_out: str
+    court_region: str | None
+    projected_x: float | None
+    projected_y: float | None
+    rule: str
+
+
+@dataclass(frozen=True)
 class PlayerStats:
     shots: int = 0
     average_speed_kmh: float | None = None
@@ -28,6 +39,7 @@ class PlayerStats:
 @dataclass(frozen=True)
 class MatchStats:
     shot_events: list[ShotEvent]
+    bounce_events: list[BounceEvent]
     player_stats: dict[str, PlayerStats]
     average_ball_speed_kmh: float | None
     max_ball_speed_kmh: float | None
@@ -36,6 +48,7 @@ class MatchStats:
     def to_dict(self) -> dict:
         return {
             "shot_events": [asdict(event) for event in self.shot_events],
+            "bounce_events": [asdict(event) for event in self.bounce_events],
             "player_stats": {
                 role: asdict(stats) for role, stats in self.player_stats.items()
             },
@@ -129,14 +142,80 @@ def compute_match_stats(
         player_positions=player_positions,
     )
     player_stats = _compute_player_stats(player_positions, fps, speed_scale, shot_events)
+    bounce_events = classify_bounces(bounces, ball_positions, shot_events)
 
     return MatchStats(
         shot_events=shot_events,
+        bounce_events=bounce_events,
         player_stats=player_stats,
         average_ball_speed_kmh=_mean(ball_speeds),
         max_ball_speed_kmh=_max(ball_speeds),
         scene_cuts=scene_cuts or [],
     )
+
+
+def classify_bounces(
+    bounces: set[int],
+    projected_ball_positions,
+    shot_events: list[ShotEvent],
+) -> list[BounceEvent]:
+    """Classify bounce locations with serve-box rules before rally rules."""
+    court = CourtReference()
+    shot_frames = [event.frame for event in shot_events]
+    events = []
+
+    for bounce_frame in sorted(bounces):
+        point = (
+            projected_ball_positions[bounce_frame]
+            if bounce_frame < len(projected_ball_positions)
+            else None
+        )
+        previous_shot_index = _previous_shot_index(bounce_frame, shot_frames)
+
+        if previous_shot_index is None:
+            events.append(
+                BounceEvent(
+                    frame=bounce_frame,
+                    phase="pre_shot",
+                    in_out="unknown",
+                    court_region=None,
+                    projected_x=None if point is None else point[0],
+                    projected_y=None if point is None else point[1],
+                    rule="no preceding shot, so serve/game boundary is unknown",
+                )
+            )
+            continue
+
+        if previous_shot_index == 0:
+            server_role = shot_events[0].player_role
+            in_out, region = _classify_serve_bounce(point, court, server_role)
+            events.append(
+                BounceEvent(
+                    frame=bounce_frame,
+                    phase="serve",
+                    in_out=in_out,
+                    court_region=region,
+                    projected_x=None if point is None else point[0],
+                    projected_y=None if point is None else point[1],
+                    rule="serve uses the opposite service box boundaries",
+                )
+            )
+            continue
+
+        in_out, region = _classify_game_bounce(point, court)
+        events.append(
+            BounceEvent(
+                frame=bounce_frame,
+                phase="game",
+                in_out=in_out,
+                court_region=region,
+                projected_x=None if point is None else point[0],
+                projected_y=None if point is None else point[1],
+                rule="game uses full singles court boundaries",
+            )
+        )
+
+    return events
 
 
 def detect_shot_events(
@@ -211,6 +290,59 @@ def detect_sustained_trajectory_changes(
             shot_frames.append(frame_num)
 
     return shot_frames
+
+
+def _previous_shot_index(frame_num: int, shot_frames: list[int]) -> int | None:
+    previous_indices = [
+        index for index, shot_frame in enumerate(shot_frames) if shot_frame < frame_num
+    ]
+    if not previous_indices:
+        return None
+    return previous_indices[-1]
+
+
+def _classify_serve_bounce(point, court: CourtReference, server_role: str | None):
+    if point is None:
+        return "unknown", None
+
+    x, y = point
+    left_x = court.left_inner_line[0][0]
+    center_x = court.middle_line[0][0]
+    right_x = court.right_inner_line[0][0]
+
+    if server_role == "top_player":
+        service_y_min = court.net[0][1]
+        service_y_max = court.bottom_inner_line[0][1]
+        court_half = "bottom"
+    else:
+        service_y_min = court.top_inner_line[0][1]
+        service_y_max = court.net[0][1]
+        court_half = "top"
+
+    if not _inside_rect(x, y, left_x, right_x, service_y_min, service_y_max):
+        return "out", None
+
+    side = "left" if x <= center_x else "right"
+    return "in", f"{court_half}_{side}_service_box"
+
+
+def _classify_game_bounce(point, court: CourtReference):
+    if point is None:
+        return "unknown", None
+
+    x, y = point
+    left_x = court.left_inner_line[0][0]
+    right_x = court.right_inner_line[0][0]
+    top_y = court.baseline_top[0][1]
+    bottom_y = court.baseline_bottom[0][1]
+
+    if _inside_rect(x, y, left_x, right_x, top_y, bottom_y):
+        return "in", "singles_court"
+    return "out", None
+
+
+def _inside_rect(x, y, left_x, right_x, top_y, bottom_y):
+    return left_x <= x <= right_x and top_y <= y <= bottom_y
 
 
 def draw_stats_overlay(frames: Sequence, stats: MatchStats) -> list:
@@ -438,7 +570,7 @@ def _compute_player_stats(player_positions, fps, scales, shot_events):
 def _draw_stats_panel(frame, stats: MatchStats) -> None:
     height, width = frame.shape[:2]
     panel_width = min(430, width - 20)
-    panel_height = 155
+    panel_height = 180
     x1 = 10
     y1 = height - panel_height - 10
     x2 = x1 + panel_width
@@ -451,6 +583,7 @@ def _draw_stats_panel(frame, stats: MatchStats) -> None:
     lines = [
         f"Shots: {len(stats.shot_events)}",
         f"Ball avg/max: {_format_speed(stats.average_ball_speed_kmh)} / {_format_speed(stats.max_ball_speed_kmh)}",
+        _format_bounce_summary(stats.bounce_events),
     ]
 
     for role, player_stats in stats.player_stats.items():
@@ -480,3 +613,10 @@ def _format_speed(value):
     if value is None:
         return "n/a"
     return f"{value:.1f} km/h"
+
+
+def _format_bounce_summary(bounce_events: list[BounceEvent]):
+    in_count = sum(1 for event in bounce_events if event.in_out == "in")
+    out_count = sum(1 for event in bounce_events if event.in_out == "out")
+    unknown_count = sum(1 for event in bounce_events if event.in_out == "unknown")
+    return f"Bounces: in {in_count}, out {out_count}, unknown {unknown_count}"
