@@ -63,6 +63,8 @@ def draw_court(
 
             if frame_num in bounces and ball_track is not None and frame_num < len(ball_track):
                 ball_point = ball_track[frame_num]
+                if not _has_point(ball_point):
+                    ball_point = _interpolated_point(ball_track, frame_num, max_gap=8)
                 if _has_point(ball_point):
                     _draw_projected_point(
                         minimap,
@@ -95,6 +97,36 @@ def draw_court(
 
 def _has_point(point):
     return point is not None and point[0] is not None and point[1] is not None
+
+
+def _interpolated_point(points, frame_num, max_gap):
+    before = _nearest_valid_point(points, frame_num - 1, step=-1, max_steps=max_gap)
+    after = _nearest_valid_point(points, frame_num + 1, step=1, max_steps=max_gap)
+    if before is None or after is None:
+        return (None, None)
+
+    before_frame, before_point = before
+    after_frame, after_point = after
+    frame_span = after_frame - before_frame
+    if frame_span <= 0:
+        return (None, None)
+
+    t = (frame_num - before_frame) / frame_span
+    x = before_point[0] + (after_point[0] - before_point[0]) * t
+    y = before_point[1] + (after_point[1] - before_point[1]) * t
+    return (x, y)
+
+
+def _nearest_valid_point(points, start, step, max_steps):
+    frame = start
+    checked = 0
+    while 0 <= frame < len(points) and checked < max_steps:
+        point = points[frame]
+        if _has_point(point):
+            return frame, point
+        frame += step
+        checked += 1
+    return None
 
 
 def _draw_projected_point(image, homography_matrix, point, color, radius, label=None):

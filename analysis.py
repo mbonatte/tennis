@@ -141,6 +141,7 @@ def compute_match_stats(
         projected_ball_positions=ball_positions,
         player_positions=player_positions,
     )
+    bounces = refine_bounce_frames(bounces, shot_detection_positions, shot_events, fps)
     player_stats = _compute_player_stats(player_positions, fps, speed_scale, shot_events)
     bounce_events = classify_bounces(bounces, ball_positions, shot_events)
 
@@ -152,6 +153,82 @@ def compute_match_stats(
         max_ball_speed_kmh=_max(ball_speeds),
         scene_cuts=scene_cuts or [],
     )
+
+
+def refine_bounce_frames(
+    bounces: set[int],
+    ball_positions,
+    shot_events: list[ShotEvent],
+    fps: int,
+) -> set[int]:
+    """Remove pre-shot toss detections and recover bounces hidden by short occlusions."""
+    shot_frames = [event.frame for event in shot_events]
+    if not shot_frames:
+        return set()
+
+    first_shot_frame = shot_frames[0]
+    refined = {frame for frame in bounces if frame > first_shot_frame}
+    recovered = recover_occluded_bounces(ball_positions, shot_frames, fps)
+
+    for frame in recovered:
+        if frame <= first_shot_frame:
+            continue
+        if _near_any(frame, refined, radius=max(4, int(fps * 0.16))):
+            continue
+        refined.add(frame)
+
+    return refined
+
+
+def recover_occluded_bounces(ball_positions, shot_frames: list[int], fps: int) -> set[int]:
+    """Estimate bounces hidden inside short missing-track gaps."""
+    recovered = set()
+    max_gap_frames = max(3, int(fps * 0.22))
+    min_gap_frames = 2
+
+    index = 0
+    while index < len(ball_positions):
+        if _point_or_none(ball_positions[index]) is not None:
+            index += 1
+            continue
+
+        gap_start = index
+        while index < len(ball_positions) and _point_or_none(ball_positions[index]) is None:
+            index += 1
+        gap_end = index - 1
+        gap_length = gap_end - gap_start + 1
+
+        if gap_length < min_gap_frames or gap_length > max_gap_frames:
+            continue
+
+        before = _nearest_valid_point(ball_positions, gap_start - 1, step=-1, max_steps=4)
+        after = _nearest_valid_point(ball_positions, gap_end + 1, step=1, max_steps=4)
+        if before is None or after is None:
+            continue
+
+        before_frame, before_point = before
+        after_frame, after_point = after
+        if _crosses_shot(before_frame, after_frame, shot_frames):
+            continue
+
+        before_velocity = _local_y_velocity(ball_positions, before_frame, direction=-1)
+        after_velocity = _local_y_velocity(ball_positions, after_frame, direction=1)
+        if before_velocity is None or after_velocity is None:
+            continue
+
+        # Image y grows downward: falling is positive, rising is negative.
+        falling_then_rising = before_velocity > 0 and after_velocity < 0
+        falling_then_low_before_next_shot = (
+            before_velocity > 0
+            and after_point[1] >= before_point[1]
+            and _next_shot_after(gap_end, shot_frames, max_frames=int(fps * 0.4)) is not None
+        )
+        if not (falling_then_rising or falling_then_low_before_next_shot):
+            continue
+
+        recovered.add((gap_start + gap_end) // 2)
+
+    return recovered
 
 
 def classify_bounces(
@@ -170,6 +247,12 @@ def classify_bounces(
             if bounce_frame < len(projected_ball_positions)
             else None
         )
+        if point is None:
+            point = _interpolated_position_at(
+                projected_ball_positions,
+                bounce_frame,
+                max_gap=8,
+            )
         previous_shot_index = _previous_shot_index(bounce_frame, shot_frames)
 
         if previous_shot_index is None:
@@ -299,6 +382,68 @@ def _previous_shot_index(frame_num: int, shot_frames: list[int]) -> int | None:
     if not previous_indices:
         return None
     return previous_indices[-1]
+
+
+def _nearest_valid_point(ball_positions, start: int, step: int, max_steps: int):
+    frame = start
+    checked = 0
+    while 0 <= frame < len(ball_positions) and checked < max_steps:
+        point = _point_or_none(ball_positions[frame])
+        if point is not None:
+            return frame, point
+        frame += step
+        checked += 1
+    return None
+
+
+def _interpolated_position_at(positions, frame_num: int, max_gap: int):
+    before = _nearest_valid_point(positions, frame_num - 1, step=-1, max_steps=max_gap)
+    after = _nearest_valid_point(positions, frame_num + 1, step=1, max_steps=max_gap)
+    if before is None or after is None:
+        return None
+
+    before_frame, before_point = before
+    after_frame, after_point = after
+    frame_span = after_frame - before_frame
+    if frame_span <= 0:
+        return None
+
+    t = (frame_num - before_frame) / frame_span
+    x = before_point[0] + (after_point[0] - before_point[0]) * t
+    y = before_point[1] + (after_point[1] - before_point[1]) * t
+    return float(x), float(y)
+
+
+def _local_y_velocity(ball_positions, frame: int, direction: int):
+    current = _point_or_none(ball_positions[frame])
+    if current is None:
+        return None
+
+    other = _nearest_valid_point(
+        ball_positions,
+        frame + direction,
+        step=direction,
+        max_steps=4,
+    )
+    if other is None:
+        return None
+
+    other_frame, other_point = other
+    frame_delta = frame - other_frame
+    if frame_delta == 0:
+        return None
+    return (current[1] - other_point[1]) / frame_delta
+
+
+def _crosses_shot(start_frame: int, end_frame: int, shot_frames: list[int]):
+    return any(start_frame <= shot_frame <= end_frame for shot_frame in shot_frames)
+
+
+def _next_shot_after(frame_num: int, shot_frames: list[int], max_frames: int):
+    for shot_frame in shot_frames:
+        if 0 < shot_frame - frame_num <= max_frames:
+            return shot_frame
+    return None
 
 
 def _classify_serve_bounce(point, court: CourtReference, server_role: str | None):
@@ -488,6 +633,9 @@ def _window_mean(values, center: int, radius: int):
 
 
 def _shot_segment_speed(ball_speeds, frame_num: int, shot_frames: list[int]):
+    if not ball_speeds:
+        return None
+
     try:
         frame_index = shot_frames.index(frame_num)
     except ValueError:

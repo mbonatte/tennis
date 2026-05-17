@@ -54,3 +54,5 @@ Useful switches:
 Shot frames use the reference repo's sustained vertical trajectory-change heuristic adapted to TrackNet center points. Speed and player statistics are still heuristic estimates from monocular video, so treat them as debug analytics until they are validated against labeled match events.
 
 Bounce calls in `analysis_stats.json` use different rules for serve and rally play: the first bounce after the first shot is checked against the opposite service boxes, while later game bounces are checked against the full singles court.
+
+Short missing ball tracks can happen when the ball is hidden behind a player. The analyzer now rejects pre-shot toss detections and recovers likely hidden bounces by looking for a short occlusion where the ball is falling before the gap, reappears low, and the next shot follows soon after.

@@ -13,6 +13,10 @@ from analysis import (
     compute_match_stats,
     detect_scene_cuts,
     draw_stats_overlay,
+    detect_shot_events,
+    project_ball_track,
+    project_player_tracks,
+    refine_bounce_frames,
     save_stats,
 )
 from ball import draw_track, track_ball
@@ -181,6 +185,8 @@ def draw_bounce_markers(frames: Sequence, ball_track: Sequence[tuple], bounces: 
         annotated = frame.copy()
         if frame_num in bounces and frame_num < len(ball_track):
             point = ball_track[frame_num]
+            if point[0] is None or point[1] is None:
+                point = interpolate_point(ball_track, frame_num, max_gap=8)
             if point[0] is not None and point[1] is not None:
                 x = int(point[0])
                 y = int(point[1])
@@ -198,6 +204,36 @@ def draw_bounce_markers(frames: Sequence, ball_track: Sequence[tuple], bounces: 
         output_frames.append(annotated)
 
     return output_frames
+
+
+def interpolate_point(points: Sequence, frame_num: int, max_gap: int):
+    before = nearest_valid_point(points, frame_num - 1, step=-1, max_steps=max_gap)
+    after = nearest_valid_point(points, frame_num + 1, step=1, max_steps=max_gap)
+    if before is None or after is None:
+        return (None, None)
+
+    before_frame, before_point = before
+    after_frame, after_point = after
+    frame_span = after_frame - before_frame
+    if frame_span <= 0:
+        return (None, None)
+
+    t = (frame_num - before_frame) / frame_span
+    x = before_point[0] + (after_point[0] - before_point[0]) * t
+    y = before_point[1] + (after_point[1] - before_point[1]) * t
+    return (x, y)
+
+
+def nearest_valid_point(points: Sequence, start: int, step: int, max_steps: int):
+    frame = start
+    checked = 0
+    while 0 <= frame < len(points) and checked < max_steps:
+        point = points[frame]
+        if point is not None and point[0] is not None and point[1] is not None:
+            return frame, point
+        frame += step
+        checked += 1
+    return None
 
 
 def draw_frame_numbers(frames: Sequence) -> list:
@@ -270,6 +306,22 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
 
     stats = None
     if config.compute_stats:
+        if homography_matrices is not None:
+            projected_ball_positions = project_ball_track(ball_track, homography_matrices)
+            projected_player_positions = project_player_tracks(player_tracks, homography_matrices)
+        else:
+            projected_ball_positions = ball_track
+            projected_player_positions = []
+
+        shot_events = detect_shot_events(
+            ball_track,
+            bounces=bounces,
+            fps=fps,
+            ball_speeds=[],
+            projected_ball_positions=projected_ball_positions,
+            player_positions=projected_player_positions,
+        )
+        bounces = refine_bounce_frames(bounces, ball_track, shot_events, fps)
         stats = compute_match_stats(
             ball_track,
             bounces=bounces,
