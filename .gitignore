@@ -1,0 +1,19 @@
+.cache/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Generated analysis outputs
+analysis_stats.json
+frames/
+output*.mp4
+tracked_output.mp4
+
+# Local media/model artifacts
+input.mp4
+input.png
+weights/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
