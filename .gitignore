@@ -8,6 +8,7 @@ analysis_stats.json
 frames/
 output*.mp4
 tracked_output.mp4
+court_configurations/
 
 # Local media/model artifacts
 input.mp4
