@@ -13,10 +13,6 @@ from analysis import (
     compute_match_stats,
     detect_scene_cuts,
     draw_stats_overlay,
-    detect_shot_events,
-    project_ball_track,
-    project_player_tracks,
-    refine_bounce_frames,
     save_stats,
 )
 from ball import draw_track, track_ball
@@ -306,22 +302,6 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
 
     stats = None
     if config.compute_stats:
-        if homography_matrices is not None:
-            projected_ball_positions = project_ball_track(ball_track, homography_matrices)
-            projected_player_positions = project_player_tracks(player_tracks, homography_matrices)
-        else:
-            projected_ball_positions = ball_track
-            projected_player_positions = []
-
-        shot_events = detect_shot_events(
-            ball_track,
-            bounces=bounces,
-            fps=fps,
-            ball_speeds=[],
-            projected_ball_positions=projected_ball_positions,
-            player_positions=projected_player_positions,
-        )
-        bounces = refine_bounce_frames(bounces, ball_track, shot_events, fps)
         stats = compute_match_stats(
             ball_track,
             bounces=bounces,
@@ -330,6 +310,7 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
             player_tracks=player_tracks,
             scene_cuts=scene_cuts,
         )
+        bounces = {event.frame for event in stats.bounce_events}
         save_stats(stats, config.stats_path)
 
     if config.draw_ball_track:

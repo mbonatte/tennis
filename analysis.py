@@ -141,7 +141,22 @@ def compute_match_stats(
         projected_ball_positions=ball_positions,
         player_positions=player_positions,
     )
-    bounces = refine_bounce_frames(bounces, shot_detection_positions, shot_events, fps)
+    shot_events = refine_shot_events_from_bounces(
+        shot_events,
+        bounces,
+        shot_detection_positions,
+        ball_positions,
+        player_positions,
+        fps,
+        projected_bounce_positions=ball_positions,
+    )
+    bounces = refine_bounce_frames(
+        bounces,
+        shot_detection_positions,
+        shot_events,
+        fps,
+        projected_ball_positions=ball_positions,
+    )
     player_stats = _compute_player_stats(player_positions, fps, speed_scale, shot_events)
     bounce_events = classify_bounces(bounces, ball_positions, shot_events)
 
@@ -160,6 +175,7 @@ def refine_bounce_frames(
     ball_positions,
     shot_events: list[ShotEvent],
     fps: int,
+    projected_ball_positions=None,
 ) -> set[int]:
     """Remove pre-shot toss detections and recover bounces hidden by short occlusions."""
     shot_frames = [event.frame for event in shot_events]
@@ -167,7 +183,13 @@ def refine_bounce_frames(
         return set()
 
     first_shot_frame = shot_frames[0]
-    refined = {frame for frame in bounces if frame > first_shot_frame}
+    min_shot_to_bounce_gap = max(6, int(fps * 0.22))
+    bounces = _filter_projected_bounce_outliers(bounces, projected_ball_positions)
+    refined = {
+        frame
+        for frame in bounces
+        if frame - first_shot_frame >= min_shot_to_bounce_gap
+    }
     recovered = recover_occluded_bounces(ball_positions, shot_frames, fps)
 
     for frame in recovered:
@@ -178,6 +200,220 @@ def refine_bounce_frames(
         refined.add(frame)
 
     return refined
+
+
+def refine_shot_events_from_bounces(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    projected_ball_positions,
+    player_positions,
+    fps: int,
+    projected_bounce_positions=None,
+) -> list[ShotEvent]:
+    """Use bounce context to remove bounce-as-shot labels and recover post-bounce hits."""
+    min_gap = max(6, int(fps * 0.22))
+    original_bounces = set(bounces)
+    bounces = _filter_projected_bounce_outliers(bounces, projected_bounce_positions)
+    rejected_bounces = original_bounces - bounces
+    filtered = [
+        event
+        for event in shot_events
+        if not _near_any(event.frame, bounces, radius=max(2, int(fps * 0.08)))
+        and _has_enough_track_context(ball_positions, event.frame, radius=4)
+    ]
+    filtered = _ensure_initial_serve_shot(filtered, bounces, ball_positions, projected_ball_positions, player_positions, fps)
+
+    for bounce_frame in sorted(bounces):
+        if _has_shot_after_bounce(filtered, bounce_frame, fps):
+            continue
+
+        hit_frame = _estimate_post_bounce_hit_frame(ball_positions, bounce_frame, fps)
+        if hit_frame is None:
+            continue
+        if _near_any(hit_frame, rejected_bounces, radius=max(2, int(fps * 0.08))):
+            continue
+        if _near_any(hit_frame, {event.frame for event in filtered}, radius=min_gap):
+            continue
+
+        player_role, _ = _nearest_player(
+            hit_frame,
+            projected_ball_positions,
+            player_positions,
+        )
+        filtered.append(
+            ShotEvent(
+                frame=hit_frame,
+                player_role=player_role,
+                ball_speed_kmh=None,
+                reason="post_bounce_hit_window",
+            )
+        )
+
+    return _merge_shot_events(filtered, min_gap=min_gap)
+
+
+def _ensure_initial_serve_shot(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    projected_ball_positions,
+    player_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    if not bounces or not shot_events:
+        return shot_events
+
+    first_bounce = _first_plausible_bounce(bounces, ball_positions, fps)
+    if first_bounce is None:
+        return shot_events
+
+    first_shot = min(event.frame for event in shot_events)
+    if first_shot < first_bounce:
+        return shot_events
+
+    serve_frame = _estimate_pre_bounce_serve_hit(ball_positions, first_bounce, fps)
+    if serve_frame is None:
+        return shot_events
+
+    player_role, _ = _nearest_player(serve_frame, projected_ball_positions, player_positions)
+    return [
+        ShotEvent(
+            frame=serve_frame,
+            player_role=player_role,
+            ball_speed_kmh=None,
+            reason="pre_bounce_serve_hit",
+        ),
+        *shot_events,
+    ]
+
+
+def _first_plausible_bounce(bounces: set[int], ball_positions, fps: int):
+    for frame in sorted(bounces):
+        if _has_enough_track_context(ball_positions, frame, radius=max(3, int(fps * 0.12))):
+            return frame
+    return None
+
+
+def _estimate_pre_bounce_serve_hit(ball_positions, bounce_frame: int, fps: int):
+    start = max(1, bounce_frame - max(16, int(fps * 0.6)))
+    end = max(start, bounce_frame - max(6, int(fps * 0.2)))
+    candidates = []
+
+    for frame_num in range(start, end + 1):
+        point = _point_or_none(ball_positions[frame_num])
+        if point is None:
+            continue
+
+        prev_v = _local_y_velocity(ball_positions, frame_num, direction=-1)
+        next_v = _local_y_velocity(ball_positions, frame_num, direction=1)
+        if prev_v is None or next_v is None:
+            continue
+
+        # Prefer the first frame where the serve starts moving sharply downward.
+        if next_v >= 12:
+            return frame_num
+        if next_v > 0:
+            candidates.append((next_v, frame_num))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _filter_projected_bounce_outliers(bounces: set[int], projected_ball_positions):
+    if projected_ball_positions is None:
+        return set(bounces)
+
+    court = CourtReference()
+    left_x = court.left_court_line[0][0] - 180
+    right_x = court.right_court_line[0][0] + 180
+    top_y = court.baseline_top[0][1] - 350
+    bottom_y = court.baseline_bottom[0][1] + 350
+
+    filtered = set()
+    for frame in bounces:
+        if frame >= len(projected_ball_positions):
+            continue
+        point = projected_ball_positions[frame]
+        if point is None:
+            filtered.add(frame)
+            continue
+
+        x, y = point
+        if left_x <= x <= right_x and top_y <= y <= bottom_y:
+            filtered.add(frame)
+
+    return filtered
+
+
+def _has_shot_after_bounce(shot_events: list[ShotEvent], bounce_frame: int, fps: int):
+    min_after = max(5, int(fps * 0.16))
+    max_after = max(24, int(fps * 0.8))
+    return any(min_after <= event.frame - bounce_frame <= max_after for event in shot_events)
+
+
+def _estimate_post_bounce_hit_frame(ball_positions, bounce_frame: int, fps: int):
+    start = bounce_frame + max(5, int(fps * 0.18))
+    end = min(len(ball_positions) - 1, bounce_frame + max(14, int(fps * 0.6)))
+    if start >= end:
+        return None
+
+    candidates = []
+    for frame_num in range(start, end + 1):
+        point = _point_or_none(ball_positions[frame_num])
+        if point is None:
+            continue
+
+        prev_v = _local_y_velocity(ball_positions, frame_num, direction=-1)
+        next_v = _local_y_velocity(ball_positions, frame_num, direction=1)
+        if prev_v is None or next_v is None:
+            continue
+
+        turn_score = abs(next_v - prev_v)
+        candidates.append((turn_score, frame_num))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _merge_shot_events(events: list[ShotEvent], min_gap: int):
+    events = sorted(events, key=lambda event: event.frame)
+    merged = []
+
+    for event in events:
+        if not merged or event.frame - merged[-1].frame >= min_gap:
+            merged.append(event)
+            continue
+
+        previous = merged[-1]
+        if _shot_priority(event) > _shot_priority(previous):
+            merged[-1] = event
+
+    return merged
+
+
+def _shot_priority(event: ShotEvent):
+    priority = 0
+    if event.player_role is not None:
+        priority += 2
+    if event.ball_speed_kmh is not None:
+        priority += 1
+    if event.reason == "post_bounce_hit_window":
+        priority += 1
+    return priority
+
+
+def _has_enough_track_context(ball_positions, frame_num: int, radius: int):
+    start = max(0, frame_num - radius)
+    end = min(len(ball_positions), frame_num + radius + 1)
+    valid = sum(1 for point in ball_positions[start:end] if _point_or_none(point) is not None)
+    return valid >= max(3, radius)
 
 
 def recover_occluded_bounces(ball_positions, shot_frames: list[int], fps: int) -> set[int]:
