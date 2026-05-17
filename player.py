@@ -1,0 +1,818 @@
+from dataclasses import dataclass
+from typing import Optional, Tuple, List
+
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+
+@dataclass
+class TrackedPlayer:
+    role: str                         # "top_player" or "bottom_player"
+    track_id: Optional[int]
+    bbox: Tuple[int, int, int, int]    # x1, y1, x2, y2
+    conf: float
+    center: Tuple[int, int]
+
+
+@dataclass
+class TrackedPosePlayer(TrackedPlayer):
+    keypoints_xy: np.ndarray           # shape: (17, 2)
+    keypoints_conf: np.ndarray         # shape: (17,)
+
+
+@dataclass
+class HybridTrackedPlayer:
+    role: str
+    track_id: Optional[int]
+
+    # Always available from box tracker
+    bbox: Tuple[int, int, int, int]
+    conf: float
+    center: Tuple[int, int]
+
+    # Optional pose data
+    has_pose: bool = False
+    keypoints_xy: Optional[np.ndarray] = None
+    keypoints_conf: Optional[np.ndarray] = None
+
+class BasePlayerTracker:
+    """
+    Parent class for tennis player tracking.
+
+    Child classes should implement:
+        - _extract_detections()
+        - draw()
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.5,
+        tracker: str = "bytetrack.yaml",
+        min_box_area: int = 500,
+    ):
+        self.model = YOLO(model_path)
+        self.model.overrides["verbose"] = False
+
+        self.conf = conf
+        self.tracker = tracker
+        self.min_box_area = min_box_area
+
+        self.last_top_player = None
+        self.last_bottom_player = None
+
+    def track_frame(self, frame):
+        """
+        Run YOLO tracking on one frame.
+        """
+        results = self.model.track(
+            frame,
+            persist=True,
+            classes=[0],          # person class
+            conf=self.conf,
+            tracker=self.tracker,
+            verbose=False,
+        )
+
+        result = results[0]
+        detections = self._extract_detections(result)
+        players = self._assign_top_bottom_players(detections, frame.shape)
+
+        return players, result
+
+    def track_frames(self, frames):
+        """
+        Run tracking on a list of frames.
+        """
+        all_players = []
+        raw_results = []
+
+        for frame in frames:
+            players, result = self.track_frame(frame)
+            all_players.append(players)
+            raw_results.append(result)
+
+        return all_players, raw_results
+
+    def annotate_frames(self, frames, player_tracks):
+        """
+        Draw tracking result on a list of frames.
+        """
+        annotated_frames = []
+
+        for frame, players in zip(frames, player_tracks):
+            annotated_frames.append(self.draw(frame, players))
+
+        return annotated_frames
+
+    def _extract_base_box_data(self, result):
+        """
+        Shared box extraction used by both box and pose trackers.
+        """
+        detections = []
+
+        if result.boxes is None or len(result.boxes) == 0:
+            return detections
+
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+
+        ids = result.boxes.id
+        if ids is not None:
+            ids = ids.cpu().numpy().astype(int)
+        else:
+            ids = [None] * len(boxes)
+
+        for box, conf, track_id in zip(boxes, confs, ids):
+            x1, y1, x2, y2 = box.astype(int)
+
+            w = x2 - x1
+            h = y2 - y1
+            area = w * h
+
+            if area < self.min_box_area:
+                continue
+
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+
+            detections.append({
+                "track_id": None if track_id is None else int(track_id),
+                "bbox": (x1, y1, x2, y2),
+                "conf": float(conf),
+                "center": (cx, cy),
+                "area": area,
+            })
+
+        return detections
+
+    def _assign_top_bottom_players(self, detections, frame_shape):
+        """
+        Assign detections to top_player and bottom_player.
+
+        This works well for a fixed behind-the-court tennis camera:
+        - far-side player is usually in the top half
+        - near-side player is usually in the bottom half
+        """
+        if not detections:
+            return []
+
+        frame_h, _ = frame_shape[:2]
+        mid_y = frame_h / 2
+
+        top_candidates = []
+        bottom_candidates = []
+
+        for det in detections:
+            _, cy = det["center"]
+
+            if cy < mid_y:
+                top_candidates.append(det)
+            else:
+                bottom_candidates.append(det)
+
+        top_player = max(top_candidates, key=self._score_detection, default=None)
+        bottom_player = max(bottom_candidates, key=self._score_detection, default=None)
+
+        if top_player is not None:
+            self.last_top_player = top_player
+        else:
+            top_player = self.last_top_player
+
+        if bottom_player is not None:
+            self.last_bottom_player = bottom_player
+        else:
+            bottom_player = self.last_bottom_player
+
+        players = []
+
+        if top_player is not None:
+            players.append(self._make_player("top_player", top_player))
+
+        if bottom_player is not None:
+            players.append(self._make_player("bottom_player", bottom_player))
+
+        return players
+
+    def _score_detection(self, det):
+        """
+        Default scoring function.
+
+        Child classes may override this.
+        """
+        area_score = min(det["area"] / 50000, 1.0)
+        return det["conf"] * 0.7 + area_score * 0.3
+
+    def _extract_detections(self, result):
+        """
+        Must be implemented by child class.
+        """
+        raise NotImplementedError
+
+    def _make_player(self, role, det):
+        """
+        Must be implemented by child class.
+        """
+        raise NotImplementedError
+
+    def draw(self, frame, players):
+        """
+        Must be implemented by child class.
+        """
+        raise NotImplementedError
+    
+class BoxPlayerTracker(BasePlayerTracker):
+    """
+    Child class for bounding-box player tracking.
+    """
+
+    def __init__(
+        self,
+        model_path: str = "weights/yolo11n.pt",
+        conf: float = 0.5,
+        tracker: str = "bytetrack.yaml",
+        min_box_area: int = 500,
+    ):
+        super().__init__(
+            model_path=model_path,
+            conf=conf,
+            tracker=tracker,
+            min_box_area=min_box_area,
+        )
+
+    def _extract_detections(self, result):
+        return self._extract_base_box_data(result)
+
+    def _make_player(self, role, det):
+        return TrackedPlayer(
+            role=role,
+            track_id=det["track_id"],
+            bbox=det["bbox"],
+            conf=det["conf"],
+            center=det["center"],
+        )
+
+    def draw(self, frame, players):
+        annotated = frame.copy()
+
+        for player in players:
+            x1, y1, x2, y2 = player.bbox
+
+            label = player.role
+            if player.track_id is not None:
+                label += f" ID:{player.track_id}"
+
+            label += f" {player.conf:.2f}"
+
+            cv2.rectangle(
+                annotated,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2,
+            )
+
+            cv2.circle(
+                annotated,
+                player.center,
+                5,
+                (0, 0, 255),
+                -1,
+            )
+
+            cv2.putText(
+                annotated,
+                label,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (0, 255, 0),
+                2,
+            )
+
+        return annotated
+    
+class PosePlayerTracker(BasePlayerTracker):
+    """
+    Child class for pose/keypoint player tracking.
+    """
+
+    COCO_SKELETON = [
+        (5, 7),    # left shoulder to left elbow
+        (7, 9),    # left elbow to left wrist
+        (6, 8),    # right shoulder to right elbow
+        (8, 10),   # right elbow to right wrist
+        (5, 6),    # shoulders
+        (5, 11),   # left shoulder to left hip
+        (6, 12),   # right shoulder to right hip
+        (11, 12),  # hips
+        (11, 13),  # left hip to left knee
+        (13, 15),  # left knee to left ankle
+        (12, 14),  # right hip to right knee
+        (14, 16),  # right knee to right ankle
+    ]
+
+    KEYPOINT_NAMES = {
+        0: "nose",
+        1: "left_eye",
+        2: "right_eye",
+        3: "left_ear",
+        4: "right_ear",
+        5: "left_shoulder",
+        6: "right_shoulder",
+        7: "left_elbow",
+        8: "right_elbow",
+        9: "left_wrist",
+        10: "right_wrist",
+        11: "left_hip",
+        12: "right_hip",
+        13: "left_knee",
+        14: "right_knee",
+        15: "left_ankle",
+        16: "right_ankle",
+    }
+
+    def __init__(
+        self,
+        model_path: str = "weights/yolo11n-pose.pt",
+        conf: float = 0.5,
+        tracker: str = "bytetrack.yaml",
+        min_box_area: int = 500,
+        keypoint_conf_threshold: float = 0.3,
+    ):
+        super().__init__(
+            model_path=model_path,
+            conf=conf,
+            tracker=tracker,
+            min_box_area=min_box_area,
+        )
+
+        self.keypoint_conf_threshold = keypoint_conf_threshold
+
+    def _extract_detections(self, result):
+        detections = self._extract_base_box_data(result)
+
+        if not detections:
+            return []
+
+        if result.keypoints is None:
+            return []
+
+        keypoints_xy = result.keypoints.xy.cpu().numpy()
+
+        if result.keypoints.conf is not None:
+            keypoints_conf = result.keypoints.conf.cpu().numpy()
+        else:
+            keypoints_conf = np.ones((len(keypoints_xy), keypoints_xy.shape[1]))
+
+        # Important:
+        # _extract_base_box_data filters small boxes.
+        # So we need to rebuild pose detections carefully using the original result data.
+        pose_detections = []
+
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+
+        ids = result.boxes.id
+        if ids is not None:
+            ids = ids.cpu().numpy().astype(int)
+        else:
+            ids = [None] * len(boxes)
+
+        for box, conf, track_id, kpts_xy, kpts_conf in zip(
+            boxes,
+            confs,
+            ids,
+            keypoints_xy,
+            keypoints_conf,
+        ):
+            x1, y1, x2, y2 = box.astype(int)
+
+            w = x2 - x1
+            h = y2 - y1
+            area = w * h
+
+            if area < self.min_box_area:
+                continue
+
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+
+            pose_detections.append({
+                "track_id": None if track_id is None else int(track_id),
+                "bbox": (x1, y1, x2, y2),
+                "conf": float(conf),
+                "center": (cx, cy),
+                "area": area,
+                "keypoints_xy": kpts_xy,
+                "keypoints_conf": kpts_conf,
+            })
+
+        return pose_detections
+
+    def _score_detection(self, det):
+        pose_visibility = float(
+            np.mean(det["keypoints_conf"] > self.keypoint_conf_threshold)
+        )
+
+        area_score = min(det["area"] / 50000, 1.0)
+
+        return (
+            det["conf"] * 0.5
+            + pose_visibility * 0.3
+            + area_score * 0.2
+        )
+
+    def _make_player(self, role, det):
+        return TrackedPosePlayer(
+            role=role,
+            track_id=det["track_id"],
+            bbox=det["bbox"],
+            conf=det["conf"],
+            center=det["center"],
+            keypoints_xy=det["keypoints_xy"],
+            keypoints_conf=det["keypoints_conf"],
+        )
+
+    def draw(self, frame, players):
+        annotated = frame.copy()
+
+        for player in players:
+            self._draw_skeleton(annotated, player)
+            self._draw_keypoints(annotated, player)
+            self._draw_label(annotated, player)
+
+        return annotated
+
+    def _draw_skeleton(self, frame, player):
+        keypoints_xy = player.keypoints_xy
+        keypoints_conf = player.keypoints_conf
+
+        for start_idx, end_idx in self.COCO_SKELETON:
+            if keypoints_conf[start_idx] < self.keypoint_conf_threshold:
+                continue
+
+            if keypoints_conf[end_idx] < self.keypoint_conf_threshold:
+                continue
+
+            x1, y1 = keypoints_xy[start_idx].astype(int)
+            x2, y2 = keypoints_xy[end_idx].astype(int)
+
+            cv2.line(
+                frame,
+                (x1, y1),
+                (x2, y2),
+                (0, 255, 0),
+                2,
+            )
+
+    def _draw_keypoints(self, frame, player):
+        keypoints_xy = player.keypoints_xy
+        keypoints_conf = player.keypoints_conf
+
+        for idx, (x, y) in enumerate(keypoints_xy):
+            if keypoints_conf[idx] < self.keypoint_conf_threshold:
+                continue
+
+            cv2.circle(
+                frame,
+                (int(x), int(y)),
+                4,
+                (0, 0, 255),
+                -1,
+            )
+
+    def _draw_label(self, frame, player):
+        label = player.role
+
+        if player.track_id is not None:
+            label += f" ID:{player.track_id}"
+
+        label += f" {player.conf:.2f}"
+
+        cx, cy = player.center
+
+        cv2.putText(
+            frame,
+            label,
+            (cx - 50, max(cy - 20, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
+        )
+
+class HybridPlayerTracker(BoxPlayerTracker):
+    """
+    Uses box tracking as the primary player tracker.
+    Uses pose detection as optional extra metadata.
+
+    The player is never dropped just because pose is missing.
+    """
+
+    COCO_SKELETON = [
+        (5, 7),
+        (7, 9),
+        (6, 8),
+        (8, 10),
+        (5, 6),
+        (5, 11),
+        (6, 12),
+        (11, 12),
+        (11, 13),
+        (13, 15),
+        (12, 14),
+        (14, 16),
+    ]
+
+    KEYPOINT_NAMES = {
+        0: "nose",
+        1: "left_eye",
+        2: "right_eye",
+        3: "left_ear",
+        4: "right_ear",
+        5: "left_shoulder",
+        6: "right_shoulder",
+        7: "left_elbow",
+        8: "right_elbow",
+        9: "left_wrist",
+        10: "right_wrist",
+        11: "left_hip",
+        12: "right_hip",
+        13: "left_knee",
+        14: "right_knee",
+        15: "left_ankle",
+        16: "right_ankle",
+    }
+
+    def __init__(
+        self,
+        box_model_path: str = "weights/yolo11n.pt",
+        pose_model_path: str = "weights/yolo11n-pose.pt",
+        conf: float = 0.5,
+        pose_conf: float = 0.35,
+        tracker: str = "bytetrack.yaml",
+        min_box_area: int = 500,
+        keypoint_conf_threshold: float = 0.3,
+        max_pose_match_distance: float = 120.0,
+    ):
+        super().__init__(
+            model_path=box_model_path,
+            conf=conf,
+            tracker=tracker,
+            min_box_area=min_box_area,
+        )
+
+        self.pose_model = YOLO(pose_model_path)
+        self.pose_model.overrides["verbose"] = False
+
+        self.pose_conf = pose_conf
+        self.keypoint_conf_threshold = keypoint_conf_threshold
+        self.max_pose_match_distance = max_pose_match_distance
+
+    def track_frame(self, frame):
+        """
+        1. Track players with box model.
+        2. Detect poses with pose model.
+        3. Attach nearest pose to each tracked box player.
+        """
+        box_players, box_result = super().track_frame(frame)
+
+        pose_result = self._run_pose_model(frame)
+        pose_detections = self._extract_pose_detections(pose_result)
+
+        hybrid_players = []
+
+        for player in box_players:
+            matched_pose = self._match_pose_to_player(player, pose_detections)
+
+            if matched_pose is None:
+                hybrid_players.append(
+                    HybridTrackedPlayer(
+                        role=player.role,
+                        track_id=player.track_id,
+                        bbox=player.bbox,
+                        conf=player.conf,
+                        center=player.center,
+                        has_pose=False,
+                    )
+                )
+            else:
+                hybrid_players.append(
+                    HybridTrackedPlayer(
+                        role=player.role,
+                        track_id=player.track_id,
+                        bbox=player.bbox,
+                        conf=player.conf,
+                        center=player.center,
+                        has_pose=True,
+                        keypoints_xy=matched_pose["keypoints_xy"],
+                        keypoints_conf=matched_pose["keypoints_conf"],
+                    )
+                )
+
+        return hybrid_players, {
+            "box_result": box_result,
+            "pose_result": pose_result,
+        }
+
+    def _run_pose_model(self, frame):
+        results = self.pose_model.predict(
+            frame,
+            classes=[0],
+            conf=self.pose_conf,
+            verbose=False,
+        )
+
+        return results[0]
+
+    def _extract_pose_detections(self, pose_result):
+        detections = []
+
+        if pose_result.boxes is None or pose_result.keypoints is None:
+            return detections
+
+        boxes = pose_result.boxes.xyxy.cpu().numpy()
+        confs = pose_result.boxes.conf.cpu().numpy()
+        keypoints_xy = pose_result.keypoints.xy.cpu().numpy()
+
+        if pose_result.keypoints.conf is not None:
+            keypoints_conf = pose_result.keypoints.conf.cpu().numpy()
+        else:
+            keypoints_conf = np.ones((len(keypoints_xy), keypoints_xy.shape[1]))
+
+        for box, conf, kpts_xy, kpts_conf in zip(
+            boxes,
+            confs,
+            keypoints_xy,
+            keypoints_conf,
+        ):
+            x1, y1, x2, y2 = box.astype(int)
+
+            cx = int((x1 + x2) / 2)
+            cy = int((y1 + y2) / 2)
+
+            detections.append({
+                "bbox": (x1, y1, x2, y2),
+                "conf": float(conf),
+                "center": (cx, cy),
+                "keypoints_xy": kpts_xy,
+                "keypoints_conf": kpts_conf,
+            })
+
+        return detections
+
+    def _match_pose_to_player(self, player, pose_detections):
+        """
+        Match pose detection to tracked box player.
+
+        Uses:
+        - center distance
+        - IoU overlap
+
+        Returns the best matching pose, or None.
+        """
+        if not pose_detections:
+            return None
+
+        best_pose = None
+        best_score = -1
+
+        for pose in pose_detections:
+            distance = self._center_distance(player.center, pose["center"])
+            iou = self._bbox_iou(player.bbox, pose["bbox"])
+
+            if distance > self.max_pose_match_distance and iou < 0.1:
+                continue
+
+            distance_score = max(
+                0.0,
+                1.0 - distance / self.max_pose_match_distance
+            )
+
+            score = iou * 0.7 + distance_score * 0.3
+
+            if score > best_score:
+                best_score = score
+                best_pose = pose
+
+        return best_pose
+
+    def _center_distance(self, center_a, center_b):
+        ax, ay = center_a
+        bx, by = center_b
+
+        return float(np.sqrt((ax - bx) ** 2 + (ay - by) ** 2))
+
+    def _bbox_iou(self, box_a, box_b):
+        ax1, ay1, ax2, ay2 = box_a
+        bx1, by1, bx2, by2 = box_b
+
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+
+        inter_w = max(0, inter_x2 - inter_x1)
+        inter_h = max(0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+
+        area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+        area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+
+        union = area_a + area_b - inter_area
+
+        if union == 0:
+            return 0.0
+
+        return inter_area / union
+
+    def draw(self, frame, players):
+        annotated = frame.copy()
+
+        for player in players:
+            self._draw_box(annotated, player)
+
+            if player.has_pose:
+                self._draw_skeleton(annotated, player)
+                self._draw_keypoints(annotated, player)
+
+        return annotated
+
+    def _draw_box(self, frame, player):
+        x1, y1, x2, y2 = player.bbox
+
+        if player.has_pose:
+            label = f"{player.role} pose"
+        else:
+            label = f"{player.role} box-only"
+
+        if player.track_id is not None:
+            label += f" ID:{player.track_id}"
+
+        label += f" {player.conf:.2f}"
+
+        cv2.rectangle(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            (0, 255, 0),
+            2,
+        )
+
+        cv2.circle(
+            frame,
+            player.center,
+            5,
+            (0, 0, 255),
+            -1,
+        )
+
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (255, 255, 255),
+            2,
+        )
+
+    def _draw_skeleton(self, frame, player):
+        keypoints_xy = player.keypoints_xy
+        keypoints_conf = player.keypoints_conf
+
+        for start_idx, end_idx in self.COCO_SKELETON:
+            if keypoints_conf[start_idx] < self.keypoint_conf_threshold:
+                continue
+
+            if keypoints_conf[end_idx] < self.keypoint_conf_threshold:
+                continue
+
+            x1, y1 = keypoints_xy[start_idx].astype(int)
+            x2, y2 = keypoints_xy[end_idx].astype(int)
+
+            cv2.line(
+                frame,
+                (x1, y1),
+                (x2, y2),
+                (255, 0, 0),
+                2,
+            )
+
+    def _draw_keypoints(self, frame, player):
+        keypoints_xy = player.keypoints_xy
+        keypoints_conf = player.keypoints_conf
+
+        for idx, (x, y) in enumerate(keypoints_xy):
+            if keypoints_conf[idx] < self.keypoint_conf_threshold:
+                continue
+
+            cv2.circle(
+                frame,
+                (int(x), int(y)),
+                4,
+                (0, 0, 255),
+                -1,
+            )
