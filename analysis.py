@@ -144,6 +144,20 @@ def compute_match_stats(
         projected_ball_positions=ball_positions,
         player_positions=player_positions,
     )
+    shot_events = _recover_initial_contact_without_bounces(
+        shot_events,
+        shot_detection_positions,
+        ball_positions,
+        player_positions,
+        fps,
+    )
+    bounces = augment_bounce_candidates_from_trajectory(
+        bounces,
+        shot_detection_positions,
+        shot_events,
+        fps,
+        projected_ball_positions=ball_positions,
+    )
     shot_events = refine_shot_events_from_bounces(
         shot_events,
         bounces,
@@ -239,7 +253,115 @@ def refine_bounce_frames(
             continue
         refined.add(frame)
 
+    refined = _drop_bounces_too_close_to_shots(refined, shot_events, fps)
     return _suppress_duplicate_pre_shot_bounces(refined, shot_events, fps)
+
+
+def augment_bounce_candidates_from_trajectory(
+    bounces: set[int],
+    ball_positions,
+    shot_events: list[ShotEvent],
+    fps: int,
+    projected_ball_positions=None,
+) -> set[int]:
+    """Recover clear trajectory turns that the learned bounce model missed."""
+    refined = set(bounces)
+    shot_frames = sorted(event.frame for event in shot_events)
+    if not shot_frames:
+        return refined
+
+    projected_ball_positions = projected_ball_positions or ball_positions
+    first_shot = shot_frames[0]
+    first_bounce_candidate = _best_bounce_turn(
+        ball_positions,
+        first_shot + max(5, int(fps * 0.18)),
+        min(first_shot + max(24, int(fps * 0.95)), len(ball_positions) - 2),
+        fps,
+    )
+    if (
+        first_bounce_candidate is not None
+        and not _near_any(first_bounce_candidate, refined, radius=max(4, int(fps * 0.16)))
+        and not _projected_bounce_is_far_out(first_bounce_candidate, projected_ball_positions)
+    ):
+        refined.add(first_bounce_candidate)
+
+    for index, shot_frame in enumerate(shot_frames):
+        next_shot = shot_frames[index + 1] if index + 1 < len(shot_frames) else len(ball_positions)
+        start = shot_frame + max(5, int(fps * 0.18))
+        end = min(next_shot - max(3, int(fps * 0.12)), shot_frame + max(35, int(fps * 1.4)), len(ball_positions) - 2)
+        if start >= end:
+            continue
+        if any(start <= bounce <= end for bounce in refined):
+            continue
+
+        candidate = _best_bounce_turn(ball_positions, start, end, fps)
+        if candidate is None:
+            continue
+        if _projected_bounce_is_far_out(candidate, projected_ball_positions):
+            continue
+        refined.add(candidate)
+
+    return refined
+
+
+def _best_bounce_turn(ball_positions, start: int, end: int, fps: int) -> int | None:
+    candidates = []
+    min_turn = max(18, int(fps * 0.7))
+    for frame_num in range(start, end + 1):
+        prev_v = _local_y_velocity(ball_positions, frame_num, direction=-1)
+        next_v = _local_y_velocity(ball_positions, frame_num, direction=1)
+        if prev_v is None or next_v is None:
+            continue
+
+        direction_flip = (prev_v > 0 >= next_v) or (prev_v <= 0 < next_v)
+        turn = abs(next_v - prev_v)
+        if not direction_flip or turn < min_turn:
+            continue
+
+        point = _point_or_none(ball_positions[frame_num])
+        if point is None:
+            continue
+        support = _local_track_support(ball_positions, frame_num, radius=3, max_distance=90)
+        if support < 2:
+            continue
+        candidates.append((support * 300 + turn, frame_num))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
+
+
+def _local_track_support(ball_positions, frame_num: int, radius: int, max_distance: float) -> int:
+    point = _point_or_none(ball_positions[frame_num])
+    if point is None:
+        return 0
+
+    support = 0
+    for index in range(max(0, frame_num - radius), min(len(ball_positions), frame_num + radius + 1)):
+        other = _point_or_none(ball_positions[index])
+        if other is None:
+            continue
+        if np.hypot(point[0] - other[0], point[1] - other[1]) <= max_distance:
+            support += 1
+    return support
+
+
+def _projected_bounce_is_far_out(frame_num: int, projected_ball_positions) -> bool:
+    if projected_ball_positions is None or frame_num >= len(projected_ball_positions):
+        return False
+    point = _point_or_none(projected_ball_positions[frame_num])
+    if point is None:
+        return False
+
+    court = CourtReference()
+    left_x = court.left_court_line[0][0] - 260
+    right_x = court.right_court_line[0][0] + 260
+    top_y = court.baseline_top[0][1] - 450
+    bottom_y = court.baseline_bottom[0][1] + 450
+    x, y = point
+    return not (left_x <= x <= right_x and top_y <= y <= bottom_y)
 
 
 def _suppress_duplicate_pre_shot_bounces(
@@ -277,6 +399,20 @@ def _suppress_duplicate_pre_shot_bounces(
     return refined
 
 
+def _drop_bounces_too_close_to_shots(
+    bounces: set[int],
+    shot_events: list[ShotEvent],
+    fps: int,
+) -> set[int]:
+    shot_frames = [event.frame for event in shot_events]
+    radius = max(3, int(fps * 0.12))
+    return {
+        bounce
+        for bounce in bounces
+        if not any(0 <= abs(bounce - shot_frame) <= radius for shot_frame in shot_frames)
+    }
+
+
 def refine_shot_events_from_bounces(
     shot_events: list[ShotEvent],
     bounces: set[int],
@@ -300,6 +436,14 @@ def refine_shot_events_from_bounces(
     filtered = _drop_pre_serve_toss_events(filtered, bounces, ball_positions, fps)
     filtered = _drop_in_flight_pre_bounce_shots(filtered, bounces, fps)
     filtered = _ensure_initial_serve_shot(filtered, bounces, ball_positions, projected_ball_positions, player_positions, fps)
+    filtered = _recover_initial_contact_before_first_bounce(
+        filtered,
+        bounces,
+        ball_positions,
+        projected_ball_positions,
+        player_positions,
+        fps,
+    )
     filtered.extend(
         _recover_shots_from_rejected_bounces(
             rejected_bounces,
@@ -316,6 +460,8 @@ def refine_shot_events_from_bounces(
 
         hit_frame = _estimate_post_bounce_hit_frame(ball_positions, bounce_frame, fps)
         if hit_frame is None:
+            continue
+        if not _has_contact_turn(ball_positions, hit_frame, min_turn=max(18, int(fps * 0.7))):
             continue
         if hit_frame + max(8, int(fps * 0.3)) >= len(ball_positions):
             continue
@@ -338,6 +484,8 @@ def refine_shot_events_from_bounces(
             )
         )
 
+    filtered = _align_shots_to_bounce_contact_windows(filtered, bounces, ball_positions, fps)
+    filtered = _drop_implausible_post_bounce_shots(filtered, bounces, ball_positions, fps)
     return _merge_shot_events(filtered, min_gap=min_gap)
 
 
@@ -374,6 +522,7 @@ def _drop_in_flight_pre_bounce_shots(
     max_pre_bounce_gap = max(8, int(fps * 0.55))
     max_post_bounce_gap = max(16, int(fps * 0.8))
     kept = []
+    first_event_frame = min(event.frame for event in shot_events)
 
     for event in sorted(shot_events, key=lambda shot: shot.frame):
         previous_bounces = [frame for frame in bounces if frame < event.frame]
@@ -383,12 +532,104 @@ def _drop_in_flight_pre_bounce_shots(
 
         is_before_next_bounce = next_gap is not None and next_gap <= max_pre_bounce_gap
         is_not_after_recent_bounce = previous_gap is None or previous_gap > max_post_bounce_gap
+        if event.frame == first_event_frame and previous_gap is None:
+            kept.append(event)
+            continue
         if is_before_next_bounce and is_not_after_recent_bounce:
             continue
 
         kept.append(event)
 
     return kept
+
+
+def _recover_initial_contact_before_first_bounce(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    projected_ball_positions,
+    player_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    if not bounces or not shot_events:
+        return shot_events
+
+    first_bounce = min(bounces)
+    first_shot = min(event.frame for event in shot_events)
+    search_end = min(first_shot - max(6, int(fps * 0.22)), first_bounce - max(6, int(fps * 0.22)))
+    if search_end <= max(6, int(fps * 0.22)):
+        return shot_events
+
+    contact_frame = _first_strong_contact_turn(ball_positions, 1, search_end, fps)
+    if contact_frame is None:
+        return shot_events
+    if first_shot - contact_frame < max(6, int(fps * 0.22)):
+        return shot_events
+
+    player_role, _ = _nearest_player(
+        contact_frame,
+        projected_ball_positions,
+        player_positions,
+    )
+    return [
+        ShotEvent(
+            frame=contact_frame,
+            player_role=player_role,
+            ball_speed_kmh=None,
+            reason="early_contact_recovery",
+        ),
+        *shot_events,
+    ]
+
+
+def _recover_initial_contact_without_bounces(
+    shot_events: list[ShotEvent],
+    ball_positions,
+    projected_ball_positions,
+    player_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    if not shot_events:
+        return shot_events
+
+    first_event = min(shot_events, key=lambda event: event.frame)
+    contact_frame = _first_strong_contact_turn(
+        ball_positions,
+        1,
+        first_event.frame,
+        fps,
+    )
+    if contact_frame is None:
+        return shot_events
+    if abs(first_event.frame - contact_frame) <= max(3, int(fps * 0.12)):
+        return [
+            ShotEvent(
+                frame=contact_frame,
+                player_role=first_event.player_role,
+                ball_speed_kmh=first_event.ball_speed_kmh,
+                reason=first_event.reason,
+            )
+            if event is first_event
+            else event
+            for event in shot_events
+        ]
+    if first_event.frame - contact_frame < max(10, int(fps * 0.4)):
+        return shot_events
+
+    player_role, _ = _nearest_player(
+        contact_frame,
+        projected_ball_positions,
+        player_positions,
+    )
+    return [
+        ShotEvent(
+            frame=contact_frame,
+            player_role=player_role,
+            ball_speed_kmh=None,
+            reason="early_contact_recovery",
+        ),
+        *shot_events,
+    ]
 
 
 def _recover_shots_from_rejected_bounces(
@@ -575,7 +816,7 @@ def _estimate_post_bounce_hit_frame(ball_positions, bounce_frame: int, fps: int)
         return None
 
     candidates = []
-    preferred_offset = max(9, int(fps * 0.64))
+    preferred_offset = max(7, int(fps * 0.3))
     for frame_num in range(start, end + 1):
         point = _point_or_none(ball_positions[frame_num])
         if point is None:
@@ -593,8 +834,115 @@ def _estimate_post_bounce_hit_frame(ball_positions, bounce_frame: int, fps: int)
     if not candidates:
         return None
 
-    candidates.sort(reverse=True)
+    min_score = max(18, int(fps * 0.7))
+    candidates = [(score, frame) for score, frame in candidates if score >= min_score]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda candidate: candidate[1])
     return candidates[0][1]
+
+
+def _align_shots_to_bounce_contact_windows(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    if not bounces or not shot_events:
+        return shot_events
+
+    aligned = list(shot_events)
+    for bounce_frame in sorted(bounces):
+        hit_frame = _estimate_post_bounce_hit_frame(ball_positions, bounce_frame, fps)
+        if hit_frame is None:
+            continue
+
+        min_after = max(3, int(fps * 0.12))
+        max_after = max(16, int(fps * 0.65))
+        candidates = [
+            event
+            for event in aligned
+            if min_after <= event.frame - bounce_frame <= max_after
+        ]
+        if not candidates:
+            continue
+
+        closest = min(candidates, key=lambda event: abs(event.frame - hit_frame))
+        if abs(closest.frame - hit_frame) > max(5, int(fps * 0.22)):
+            continue
+
+        aligned.remove(closest)
+        aligned.append(
+            ShotEvent(
+                frame=hit_frame,
+                player_role=closest.player_role,
+                ball_speed_kmh=closest.ball_speed_kmh,
+                reason=closest.reason,
+            )
+        )
+
+    return aligned
+
+
+def _drop_implausible_post_bounce_shots(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    if not bounces:
+        return shot_events
+
+    min_after = max(5, int(fps * 0.2))
+    last_event_frame = max(event.frame for event in shot_events)
+    kept = []
+    for event in sorted(shot_events, key=lambda shot: shot.frame):
+        previous_bounces = [frame for frame in bounces if frame < event.frame]
+        if not previous_bounces:
+            kept.append(event)
+            continue
+
+        previous_bounce = max(previous_bounces)
+        gap = event.frame - previous_bounce
+        if gap < min_after:
+            continue
+
+        if event.reason == "post_bounce_hit_window" and not _has_contact_turn(
+            ball_positions,
+            event.frame,
+            min_turn=max(18, int(fps * 0.7)),
+        ):
+            continue
+
+        next_bounces = [frame for frame in bounces if frame > event.frame]
+        if not next_bounces and gap <= max(18, int(fps * 0.72)):
+            if not _has_contact_turn(ball_positions, event.frame, min_turn=max(24, int(fps * 0.9))):
+                continue
+        if event.frame == last_event_frame and gap <= max(18, int(fps * 0.72)):
+            if not _has_contact_turn(ball_positions, event.frame, min_turn=max(18, int(fps * 0.7))):
+                continue
+
+        kept.append(event)
+
+    return kept
+
+
+def _first_strong_contact_turn(ball_positions, start: int, end: int, fps: int) -> int | None:
+    min_turn = max(24, int(fps * 0.9))
+    for frame_num in range(max(1, start), min(end, len(ball_positions) - 2) + 1):
+        if _has_contact_turn(ball_positions, frame_num, min_turn=min_turn):
+            return frame_num
+    return None
+
+
+def _has_contact_turn(ball_positions, frame_num: int, min_turn: float) -> bool:
+    prev_v = _local_y_velocity(ball_positions, frame_num, direction=-1)
+    next_v = _local_y_velocity(ball_positions, frame_num, direction=1)
+    if prev_v is None or next_v is None:
+        return False
+
+    direction_flip = (prev_v > 0 >= next_v) or (prev_v <= 0 < next_v)
+    return direction_flip and abs(next_v - prev_v) >= min_turn
 
 
 def _merge_shot_events(events: list[ShotEvent], min_gap: int):
