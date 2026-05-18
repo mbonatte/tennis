@@ -556,6 +556,8 @@ class HybridPlayerTracker(BoxPlayerTracker):
         min_box_area: int = 500,
         keypoint_conf_threshold: float = 0.3,
         max_pose_match_distance: float = 120.0,
+        top_recovery_conf: float = 0.15,
+        top_recovery_zoom: float = 2.0,
     ):
         super().__init__(
             model_path=box_model_path,
@@ -570,6 +572,9 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.pose_conf = pose_conf
         self.keypoint_conf_threshold = keypoint_conf_threshold
         self.max_pose_match_distance = max_pose_match_distance
+        self.top_recovery_conf = top_recovery_conf
+        self.top_recovery_zoom = top_recovery_zoom
+        self.last_valid_top_player = None
 
     def track_frame(self, frame):
         """
@@ -578,6 +583,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         3. Attach nearest pose to each tracked box player.
         """
         box_players, box_result = super().track_frame(frame)
+        box_players = self._recover_top_player_if_needed(frame, box_players)
 
         pose_result = self._run_pose_model(frame)
         pose_detections = self._extract_pose_detections(pose_result)
@@ -616,6 +622,116 @@ class HybridPlayerTracker(BoxPlayerTracker):
             "box_result": box_result,
             "pose_result": pose_result,
         }
+
+    def _recover_top_player_if_needed(self, frame, players):
+        top_player = self._get_role(players, "top_player")
+
+        if top_player is not None and self._is_valid_top_player(top_player, frame.shape):
+            if top_player.track_id is not None:
+                self.last_valid_top_player = top_player
+            return players
+
+        recovered_top = self._detect_top_player_in_zoomed_roi(frame)
+        players = [player for player in players if player.role != "top_player"]
+
+        if recovered_top is not None:
+            players.append(recovered_top)
+
+        return sorted(players, key=lambda player: 0 if player.role == "top_player" else 1)
+
+    def _detect_top_player_in_zoomed_roi(self, frame):
+        if self.last_valid_top_player is None:
+            return None
+
+        roi, offset = self._top_recovery_roi(frame, self.last_valid_top_player.bbox)
+        if roi.size == 0:
+            return None
+
+        zoomed_roi = cv2.resize(
+            roi,
+            None,
+            fx=self.top_recovery_zoom,
+            fy=self.top_recovery_zoom,
+            interpolation=cv2.INTER_LINEAR,
+        )
+        results = self.model.predict(
+            zoomed_roi,
+            classes=[0],
+            conf=self.top_recovery_conf,
+            verbose=False,
+        )
+        result = results[0]
+
+        if result.boxes is None or len(result.boxes) == 0:
+            return None
+
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+        best_player = None
+        best_score = -np.inf
+
+        for box, conf in zip(boxes, confs):
+            x1, y1, x2, y2 = box / self.top_recovery_zoom
+            x1 += offset[0]
+            x2 += offset[0]
+            y1 += offset[1]
+            y2 += offset[1]
+            bbox = tuple(int(value) for value in (x1, y1, x2, y2))
+            center = (int((bbox[0] + bbox[2]) / 2), int((bbox[1] + bbox[3]) / 2))
+            candidate = TrackedPlayer(
+                role="top_player",
+                track_id=None,
+                bbox=bbox,
+                conf=float(conf),
+                center=center,
+            )
+
+            if not self._is_valid_top_player(candidate, frame.shape):
+                continue
+
+            distance = self._center_distance(center, self.last_valid_top_player.center)
+            if distance > 180:
+                continue
+
+            score = float(conf) - distance / 500.0
+            if score > best_score:
+                best_score = score
+                best_player = candidate
+
+        return best_player
+
+    def _top_recovery_roi(self, frame, bbox):
+        frame_h, frame_w = frame.shape[:2]
+        x1, y1, x2, y2 = bbox
+        width = x2 - x1
+        height = y2 - y1
+        pad_x = max(80, int(width * 2.5))
+        pad_y = max(80, int(height * 2.0))
+
+        roi_x1 = max(0, x1 - pad_x)
+        roi_y1 = max(0, y1 - pad_y)
+        roi_x2 = min(frame_w, x2 + pad_x)
+        roi_y2 = min(int(frame_h * 0.58), y2 + pad_y)
+
+        return frame[roi_y1:roi_y2, roi_x1:roi_x2], (roi_x1, roi_y1)
+
+    def _is_valid_top_player(self, player, frame_shape):
+        frame_h, frame_w = frame_shape[:2]
+        x1, _, x2, y2 = player.bbox
+        box_height = y2 - player.bbox[1]
+        center_x, _ = player.center
+        if y2 > frame_h * 0.58:
+            return False
+        if center_x < frame_w * 0.08 or center_x > frame_w * 0.92:
+            return False
+        if x2 <= x1:
+            return False
+        if box_height < frame_h * 0.06:
+            return False
+        return True
+
+    def _get_role(self, players, role):
+        return next((player for player in players if player.role == role), None)
 
     def _run_pose_model(self, frame):
         results = self.pose_model.predict(

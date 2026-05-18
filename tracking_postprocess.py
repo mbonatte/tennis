@@ -10,8 +10,9 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
         return []
 
     frame_h, frame_w = frame_shape[:2]
-    top_limit_y = frame_h * 0.58
+    top_limit_y = frame_h * 0.50
     side_margin_x = frame_w * 0.08
+    max_top_center_jump = frame_w * 0.16
 
     last_valid_top = None
     last_valid_bottom = None
@@ -30,6 +31,13 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
             top_limit_y=top_limit_y,
             side_margin_x=side_margin_x,
             frame_w=frame_w,
+        ):
+            top_player = None
+
+        if (
+            top_player is not None
+            and last_valid_top is not None
+            and _center_distance(top_player.center, last_valid_top.center) > max_top_center_jump
         ):
             top_player = None
 
@@ -61,12 +69,14 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
 
 
 def _is_valid_top_player(player, top_limit_y, side_margin_x, frame_w):
-    x1, _, x2, y2 = player.bbox
+    x1, y1, x2, y2 = player.bbox
     foot_y = y2
     center_x, _ = player.center
     if foot_y > top_limit_y:
         return False
     if center_x < side_margin_x or center_x > frame_w - side_margin_x:
+        return False
+    if y2 - y1 < top_limit_y * 0.12:
         return False
     return True
 
@@ -82,6 +92,12 @@ def _same_track(player_a, player_b):
     if player_a.track_id is None or player_b.track_id is None:
         return player_a.bbox == player_b.bbox
     return player_a.track_id == player_b.track_id
+
+
+def _center_distance(center_a, center_b):
+    dx = center_a[0] - center_b[0]
+    dy = center_a[1] - center_b[1]
+    return (dx * dx + dy * dy) ** 0.5
 
 
 def _with_role(player, role: str):

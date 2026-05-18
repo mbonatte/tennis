@@ -271,7 +271,7 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
         player_tracker = create_player_tracker()
         player_tracks = load_or_compute(
             config,
-            "players",
+            "players_v5_top_recovery",
             lambda: player_tracker.track_frames(frames)[0],
         )
         player_tracks = stabilize_player_roles(player_tracks, frames[0].shape)
