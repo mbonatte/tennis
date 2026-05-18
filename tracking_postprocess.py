@@ -12,7 +12,7 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
     frame_h, frame_w = frame_shape[:2]
     top_limit_y = frame_h * 0.50
     top_min_y = _top_player_min_foot_y(frame_h)
-    side_margin_x = frame_w * 0.08
+    side_margin_x = frame_w * 0.20
     max_top_center_jump = frame_w * 0.16
 
     last_valid_top = None

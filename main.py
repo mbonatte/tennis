@@ -286,7 +286,7 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
         player_tracker = create_player_tracker()
         player_tracks = load_or_compute(
             config,
-            "players_v9_scene_top_band",
+            "players_v10_scene_top_band",
             lambda: track_players_by_scene(frames, scene_cuts),
         )
         player_tracks = stabilize_player_roles(player_tracks, frames[0].shape)

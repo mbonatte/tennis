@@ -132,6 +132,8 @@ def compute_match_stats(
         player_positions = []
         speed_scale = None
 
+    point_start_frame = _analysis_start_frame(scene_cuts, len(ball_track))
+    bounces = {frame for frame in bounces if frame > point_start_frame}
     shot_detection_positions = [_point_or_none(point) for point in ball_track]
     ball_speeds = _segment_speeds(ball_positions, fps, speed_scale, max_speed_kmh=280)
     shot_events = detect_shot_events(
@@ -151,6 +153,7 @@ def compute_match_stats(
         fps,
         projected_bounce_positions=ball_positions,
     )
+    shot_events = [event for event in shot_events if event.frame > point_start_frame]
     shot_events = enforce_rally_player_alternation(shot_events)
     bounces = refine_bounce_frames(
         bounces,
@@ -172,6 +175,11 @@ def compute_match_stats(
     )
 
 
+def _analysis_start_frame(scene_cuts: list[int] | None, num_frames: int) -> int:
+    valid_cuts = [frame for frame in (scene_cuts or []) if 0 < frame < num_frames]
+    return max(valid_cuts, default=-1)
+
+
 def enforce_rally_player_alternation(shot_events: list[ShotEvent]) -> list[ShotEvent]:
     """Correct ambiguous player ownership by alternating consecutive rally hits."""
     corrected = []
@@ -179,7 +187,9 @@ def enforce_rally_player_alternation(shot_events: list[ShotEvent]) -> list[ShotE
 
     for event in sorted(shot_events, key=lambda shot: shot.frame):
         role = event.player_role
-        if role in {"top_player", "bottom_player"} and role == last_role:
+        if role is None and last_role in {"top_player", "bottom_player"}:
+            role = _opposite_player(last_role)
+        elif role in {"top_player", "bottom_player"} and role == last_role:
             role = _opposite_player(role)
 
         corrected_event = ShotEvent(
@@ -252,6 +262,7 @@ def refine_shot_events_from_bounces(
         if not _near_any(event.frame, bounces, radius=max(2, int(fps * 0.08)))
         and _has_enough_track_context(ball_positions, event.frame, radius=4)
     ]
+    filtered = _drop_pre_serve_toss_events(filtered, bounces, ball_positions, fps)
     filtered = _ensure_initial_serve_shot(filtered, bounces, ball_positions, projected_ball_positions, player_positions, fps)
     filtered.extend(
         _recover_shots_from_rejected_bounces(
@@ -292,6 +303,28 @@ def refine_shot_events_from_bounces(
         )
 
     return _merge_shot_events(filtered, min_gap=min_gap)
+
+
+def _drop_pre_serve_toss_events(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    ball_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    first_bounce = _first_plausible_bounce(bounces, ball_positions, fps)
+    if first_bounce is None:
+        return shot_events
+
+    serve_frame = _estimate_pre_bounce_serve_hit(ball_positions, first_bounce, fps)
+    if serve_frame is None:
+        return shot_events
+
+    keep_from = serve_frame - max(2, int(fps * 0.08))
+    return [
+        event
+        for event in shot_events
+        if event.frame >= keep_from or event.frame > first_bounce
+    ]
 
 
 def _recover_shots_from_rejected_bounces(
@@ -376,7 +409,9 @@ def _ensure_initial_serve_shot(
     if serve_frame is None:
         return shot_events
 
-    player_role, _ = _nearest_player(serve_frame, projected_ball_positions, player_positions)
+    player_role = _infer_server_role_from_first_bounce(first_bounce, projected_ball_positions)
+    if player_role is None:
+        player_role, _ = _nearest_player(serve_frame, projected_ball_positions, player_positions)
     return [
         ShotEvent(
             frame=serve_frame,
@@ -386,6 +421,20 @@ def _ensure_initial_serve_shot(
         ),
         *shot_events,
     ]
+
+
+def _infer_server_role_from_first_bounce(first_bounce: int, projected_ball_positions):
+    if projected_ball_positions is None or first_bounce >= len(projected_ball_positions):
+        return None
+
+    point = _point_or_none(projected_ball_positions[first_bounce])
+    if point is None:
+        point = _interpolated_position_at(projected_ball_positions, first_bounce, max_gap=8)
+    if point is None:
+        return None
+
+    court = CourtReference()
+    return "bottom_player" if point[1] < court.net[0][1] else "top_player"
 
 
 def _first_plausible_bounce(bounces: set[int], ball_positions, fps: int):

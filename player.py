@@ -207,11 +207,12 @@ class BasePlayerTracker:
         x1, _, x2, y2 = det["bbox"]
         center_x, _ = det["center"]
         min_foot_y = self._top_player_min_foot_y(frame_h)
+        side_margin_x = self._top_player_side_margin_x(frame_w)
         if y2 < min_foot_y:
             return False
         if y2 > frame_h * 0.50:
             return False
-        if center_x < frame_w * 0.08 or center_x > frame_w * 0.92:
+        if center_x < side_margin_x or center_x > frame_w - side_margin_x:
             return False
         if x2 <= x1:
             return False
@@ -220,6 +221,9 @@ class BasePlayerTracker:
     def _top_player_min_foot_y(self, frame_h):
         high_res_adjustment = max(0.0, min((frame_h - 720) / 360, 1.0)) * 0.04
         return frame_h * (0.18 + high_res_adjustment)
+
+    def _top_player_side_margin_x(self, frame_w):
+        return frame_w * 0.20
 
     def _extract_detections(self, result):
         """
@@ -744,7 +748,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
             return False
         if y2 > frame_h * 0.58:
             return False
-        if center_x < frame_w * 0.08 or center_x > frame_w * 0.92:
+        if center_x < self._top_player_side_margin_x(frame_w) or center_x > frame_w - self._top_player_side_margin_x(frame_w):
             return False
         if x2 <= x1:
             return False
