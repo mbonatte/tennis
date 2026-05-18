@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import pickle
 from dataclasses import dataclass
 from pathlib import Path
@@ -270,6 +271,92 @@ def _rename_point_video(path: Path, start_frame: int, end_frame: int) -> Path:
     return final_path
 
 
+def analyze_point_scenes(
+    input_path: Path | str,
+    output_dir: Path | str,
+    threshold: float = 0.55,
+    min_frames: int = 10,
+    min_shots: int = 2,
+    min_bounces: int = 1,
+    draw_players: bool = False,
+    draw_court: bool = False,
+    draw_court_keypoints: bool = False,
+) -> list[tuple[Path, Path]]:
+    """Split a compilation, analyze each scene, and keep scenes that look like played points."""
+    output_dir = Path(output_dir)
+    raw_dir = output_dir / "raw_scenes"
+    videos_dir = output_dir / "point_videos"
+    stats_dir = output_dir / "point_stats"
+    rejected_dir = output_dir / "rejected_scenes"
+    cache_dir = output_dir / ".cache"
+
+    raw_paths = split_video_by_scene(
+        input_path,
+        raw_dir,
+        threshold=threshold,
+        min_frames=min_frames,
+    )
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    stats_dir.mkdir(parents=True, exist_ok=True)
+    rejected_dir.mkdir(parents=True, exist_ok=True)
+
+    kept = []
+    for scene_index, raw_path in enumerate(raw_paths, start=1):
+        output_path = videos_dir / raw_path.name
+        stats_path = stats_dir / f"{raw_path.stem}.json"
+        print(f"Analyzing scene {scene_index}/{len(raw_paths)}: {raw_path.name}")
+
+        scene_config = AnalyzerConfig(
+            input_path=raw_path,
+            output_path=output_path,
+            stats_path=stats_path,
+            cache_dir=cache_dir,
+            track_players=True,
+            track_court=True,
+            detect_bounces=True,
+            detect_scene_cuts=True,
+            compute_stats=True,
+            use_cache=True,
+            draw_ball_track=True,
+            draw_players=draw_players,
+            draw_court_overlay=draw_court,
+            draw_court_keypoints=draw_court_keypoints,
+            draw_bounces=True,
+            draw_frame_number=True,
+            draw_stats=True,
+        )
+        analyze_video(scene_config)
+
+        if _stats_look_like_played_point(stats_path, min_shots=min_shots, min_bounces=min_bounces):
+            kept.append((output_path, stats_path))
+            continue
+
+        rejected_path = rejected_dir / raw_path.name
+        raw_path.replace(rejected_path)
+        if output_path.exists():
+            output_path.unlink()
+        if stats_path.exists():
+            stats_path.unlink()
+
+    return kept
+
+
+def _stats_look_like_played_point(stats_path: Path, min_shots: int, min_bounces: int) -> bool:
+    if not stats_path.exists():
+        return False
+
+    stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    shots = stats.get("shot_events", [])
+    bounces = stats.get("bounce_events", [])
+    known_player_shots = [
+        shot for shot in shots if shot.get("player_role") in {"top_player", "bottom_player"}
+    ]
+    playable_bounces = [
+        bounce for bounce in bounces if bounce.get("phase") in {"serve", "game"}
+    ]
+    return len(known_player_shots) >= min_shots and len(playable_bounces) >= min_bounces
+
+
 def create_player_tracker() -> HybridPlayerTracker:
     """Build the combined box and pose tracker used for player annotation."""
     return HybridPlayerTracker(
@@ -526,8 +613,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "output.mp4")
     parser.add_argument("--stats-output", type=Path, default=PROJECT_ROOT / "analysis_stats.json")
     parser.add_argument("--split-points-dir", type=Path)
+    parser.add_argument("--analyze-points-dir", type=Path)
     parser.add_argument("--split-scene-threshold", type=float, default=0.55)
     parser.add_argument("--min-point-frames", type=int, default=10)
+    parser.add_argument("--min-point-shots", type=int, default=2)
+    parser.add_argument("--min-point-bounces", type=int, default=1)
     parser.add_argument("--draw-players", action="store_true")
     parser.add_argument("--draw-court", action="store_true")
     parser.add_argument("--draw-court-keypoints", action="store_true")
@@ -566,6 +656,21 @@ def config_from_args(args: argparse.Namespace) -> AnalyzerConfig:
 
 def main() -> None:
     args = parse_args()
+    if args.analyze_points_dir is not None:
+        kept = analyze_point_scenes(
+            args.input,
+            args.analyze_points_dir,
+            threshold=args.split_scene_threshold,
+            min_frames=args.min_point_frames,
+            min_shots=args.min_point_shots,
+            min_bounces=args.min_point_bounces,
+            draw_players=args.draw_players,
+            draw_court=args.draw_court,
+            draw_court_keypoints=args.draw_court_keypoints,
+        )
+        print(f"Saved analysis for {len(kept)} played point scene(s) to: {args.analyze_points_dir}")
+        return
+
     if args.split_points_dir is not None:
         output_paths = split_video_by_scene(
             args.input,

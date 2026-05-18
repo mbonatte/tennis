@@ -23,6 +23,7 @@ Useful command-line options:
 .\.venv\Scripts\python.exe main.py --draw-court --draw-players
 .\.venv\Scripts\python.exe main.py --input input.mp4 --output output_debug.mp4
 .\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --split-points-dir points
+.\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --analyze-points-dir point_analysis --draw-court
 .\.venv\Scripts\python.exe main.py --no-players
 ```
 
@@ -53,6 +54,7 @@ Useful switches:
 - Set `draw_court_overlay=True` or run `--draw-court` to render the minimap court overlay. The minimap shows the ball in yellow, bounces in orange, top player as blue `T`, and bottom player as green `B`.
 - Set `input_path=PROJECT_ROOT / "your_video.mp4"` to analyze another file.
 - Run with `--split-points-dir points` to stream-split a long compilation into one raw MP4 per detected scene/point without running the full analyzer. Files are named with the point number and source frame range.
+- Run with `--analyze-points-dir point_analysis` to split a compilation, analyze each scene, and keep only scenes that look like played points. Played point videos are written to `point_analysis/point_videos`, and their JSON files are written to `point_analysis/point_stats`.
 
 Shot frames use the reference repo's sustained vertical trajectory-change heuristic adapted to TrackNet center points. Speed and player statistics are still heuristic estimates from monocular video, so treat them as debug analytics until they are validated against labeled match events.
 
