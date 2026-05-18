@@ -35,6 +35,7 @@ Useful command-line options:
 - `homography.py`: chooses the best court homography from detected keypoints.
 - `postprocess.py`: refines detected court keypoints using local line intersections.
 - `player.py`: player bounding-box tracking, pose tracking, and hybrid player annotation.
+- `tracking_postprocess.py`: stabilizes top/bottom player roles when detections briefly swap, duplicate, or drift off court.
 - `analysis.py`: scene cuts, reference-style shot events, bounce in/out calls, projected speeds, player stats, JSON export, and stats overlay.
 - `analysis_stats.json`: latest generated match statistics.
 - `.cache/`: cached model predictions for faster repeated runs.

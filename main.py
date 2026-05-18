@@ -19,6 +19,7 @@ from ball import draw_track, track_ball
 from bounce_detector import BounceDetector
 from court import draw_court, draw_keypoints, track_court
 from player import HybridPlayerTracker
+from tracking_postprocess import stabilize_player_roles
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -273,6 +274,7 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
             "players",
             lambda: player_tracker.track_frames(frames)[0],
         )
+        player_tracks = stabilize_player_roles(player_tracks, frames[0].shape)
         if config.draw_players:
             processed_frames = player_tracker.annotate_frames(processed_frames, player_tracks)
 
