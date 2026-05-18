@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import cv2
+import numpy as np
 import torch
 
 from BallTrack.ball_tracker import load_model, infer_model_batched, remove_outliers, split_track, interpolation
@@ -60,7 +61,7 @@ def draw_track(frames, ball_track, trace=7):
             if idx < 0:
                 break
 
-            if ball_track[idx][0] is not None and ball_track[idx][1] is not None:
+            if _has_valid_ball_point(ball_track[idx]):
                 x = int(ball_track[idx][0])
                 y = int(ball_track[idx][1])
 
@@ -77,3 +78,9 @@ def draw_track(frames, ball_track, trace=7):
         processed_frames.append(frame)
 
     return processed_frames
+
+
+def _has_valid_ball_point(point):
+    if point is None or point[0] is None or point[1] is None:
+        return False
+    return np.isfinite(point[0]) and np.isfinite(point[1])
