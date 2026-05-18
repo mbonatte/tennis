@@ -223,6 +223,15 @@ def refine_shot_events_from_bounces(
         and _has_enough_track_context(ball_positions, event.frame, radius=4)
     ]
     filtered = _ensure_initial_serve_shot(filtered, bounces, ball_positions, projected_ball_positions, player_positions, fps)
+    filtered.extend(
+        _recover_shots_from_rejected_bounces(
+            rejected_bounces,
+            ball_positions,
+            projected_ball_positions,
+            player_positions,
+            fps,
+        )
+    )
 
     for bounce_frame in sorted(bounces):
         if _has_shot_after_bounce(filtered, bounce_frame, fps):
@@ -230,6 +239,8 @@ def refine_shot_events_from_bounces(
 
         hit_frame = _estimate_post_bounce_hit_frame(ball_positions, bounce_frame, fps)
         if hit_frame is None:
+            continue
+        if hit_frame + max(8, int(fps * 0.3)) >= len(ball_positions):
             continue
         if _near_any(hit_frame, rejected_bounces, radius=max(2, int(fps * 0.08))):
             continue
@@ -251,6 +262,65 @@ def refine_shot_events_from_bounces(
         )
 
     return _merge_shot_events(filtered, min_gap=min_gap)
+
+
+def _recover_shots_from_rejected_bounces(
+    rejected_bounces: set[int],
+    ball_positions,
+    projected_ball_positions,
+    player_positions,
+    fps: int,
+) -> list[ShotEvent]:
+    recovered = []
+    for bounce_frame in sorted(rejected_bounces):
+        shot_frame = _estimate_shot_near_rejected_bounce(ball_positions, bounce_frame, fps)
+        if shot_frame is None:
+            continue
+
+        player_role, _ = _nearest_player(
+            shot_frame,
+            projected_ball_positions,
+            player_positions,
+        )
+        if player_role is None:
+            continue
+
+        recovered.append(
+            ShotEvent(
+                frame=shot_frame,
+                player_role=player_role,
+                ball_speed_kmh=None,
+                reason="rejected_bounce_contact_recovery",
+            )
+        )
+
+    return recovered
+
+
+def _estimate_shot_near_rejected_bounce(ball_positions, bounce_frame: int, fps: int):
+    search_radius = max(3, int(fps * 0.12))
+    candidates = []
+
+    for frame_num in range(bounce_frame, min(len(ball_positions), bounce_frame + search_radius + 1)):
+        point = _point_or_none(ball_positions[frame_num])
+        if point is None:
+            continue
+
+        next_v = _local_y_velocity(ball_positions, frame_num, direction=1)
+        if next_v is None:
+            continue
+
+        # After contact the ball often moves sharply upward in image space.
+        if next_v < -12:
+            preferred_offset = 2
+            offset_penalty = abs((frame_num - bounce_frame) - preferred_offset)
+            candidates.append((-next_v - offset_penalty * 10, frame_num))
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
 
 
 def _ensure_initial_serve_shot(
