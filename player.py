@@ -177,8 +177,6 @@ class BasePlayerTracker:
 
         if top_player is not None:
             self.last_top_player = top_player
-        else:
-            top_player = self.last_top_player
 
         if bottom_player is not None:
             self.last_bottom_player = bottom_player
@@ -582,6 +580,8 @@ class HybridPlayerTracker(BoxPlayerTracker):
 
         self.pose_model = YOLO(pose_model_path)
         self.pose_model.overrides["verbose"] = False
+        self.recovery_model = YOLO(box_model_path)
+        self.recovery_model.overrides["verbose"] = False
 
         self.pose_conf = pose_conf
         self.keypoint_conf_threshold = keypoint_conf_threshold
@@ -649,6 +649,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         players = [player for player in players if player.role != "top_player"]
 
         if recovered_top is not None:
+            self.last_valid_top_player = recovered_top
             players.append(recovered_top)
 
         return sorted(players, key=lambda player: 0 if player.role == "top_player" else 1)
@@ -668,7 +669,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
             fy=self.top_recovery_zoom,
             interpolation=cv2.INTER_LINEAR,
         )
-        results = self.model.predict(
+        results = self.recovery_model.predict(
             zoomed_roi,
             classes=[0],
             conf=self.top_recovery_conf,
@@ -719,7 +720,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         x1, y1, x2, y2 = bbox
         width = x2 - x1
         height = y2 - y1
-        pad_x = max(80, int(width * 2.5))
+        pad_x = max(140, int(width * 4.0))
         pad_y = max(80, int(height * 2.0))
 
         roi_x1 = max(0, x1 - pad_x)
