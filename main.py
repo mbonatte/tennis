@@ -34,6 +34,7 @@ class AnalyzerConfig:
     input_path: Path = PROJECT_ROOT / "input.mp4"
     output_path: Path = PROJECT_ROOT / "output.mp4"
     stats_path: Path = PROJECT_ROOT / "analysis_stats.json"
+    ball_history_plot_path: Path | None = None
     cache_dir: Path = PROJECT_ROOT / ".cache"
     point_output_dir: Path | None = None
 
@@ -284,6 +285,7 @@ def analyze_point_scenes(
     draw_court: bool = False,
     draw_court_keypoints: bool = False,
     keep_debug_scenes: bool = False,
+    plot_ball_history: bool = False,
 ) -> list[tuple[Path, Path]]:
     """Split a compilation, analyze each scene, and keep scenes that look like played points."""
     output_dir = Path(output_dir)
@@ -291,6 +293,7 @@ def analyze_point_scenes(
     raw_dir = existing_raw_dir if existing_raw_dir.exists() else output_dir / ".scene_work" / "raw_scenes"
     videos_dir = output_dir / "point_videos"
     stats_dir = output_dir / "point_stats"
+    plots_dir = output_dir / "ball_history_plots"
     rejected_dir = output_dir / "rejected_scenes"
     cache_dir = output_dir / ".cache"
 
@@ -311,6 +314,7 @@ def analyze_point_scenes(
     for scene_index, raw_path in enumerate(raw_paths, start=1):
         output_path = videos_dir / raw_path.name
         stats_path = stats_dir / f"{raw_path.stem}.json"
+        plot_path = plots_dir / f"{raw_path.stem}_ball_history.png"
         scene_frames = _video_frame_count(raw_path)
 
         if stats_path.exists():
@@ -324,6 +328,8 @@ def analyze_point_scenes(
                 stats_path.unlink()
                 if output_path.exists():
                     output_path.unlink()
+                if plot_path.exists():
+                    plot_path.unlink()
                 print(f"Rejected already analyzed non-point scene: {raw_path.name}")
                 continue
 
@@ -333,6 +339,8 @@ def analyze_point_scenes(
                 output_path.unlink()
             if stats_path.exists():
                 stats_path.unlink()
+            if plot_path.exists():
+                plot_path.unlink()
             print(f"Rejected short scene without full analysis: {raw_path.name}")
             continue
 
@@ -342,6 +350,7 @@ def analyze_point_scenes(
             input_path=raw_path,
             output_path=output_path,
             stats_path=stats_path,
+            ball_history_plot_path=plot_path if plot_ball_history else None,
             cache_dir=cache_dir,
             track_players=True,
             track_court=True,
@@ -370,6 +379,8 @@ def analyze_point_scenes(
             output_path.unlink()
         if stats_path.exists():
             stats_path.unlink()
+        if plot_path.exists():
+            plot_path.unlink()
 
     if not keep_debug_scenes:
         _remove_empty_parents(raw_dir, stop_at=output_dir)
@@ -572,6 +583,47 @@ def draw_frame_numbers(frames: Sequence) -> list:
     return output_frames
 
 
+def save_ball_history_plot(ball_track: Sequence, stats, output_path: Path | str) -> None:
+    """Plot ball x/y pixel history with shot and bounce frame markers."""
+    import matplotlib.pyplot as plt
+
+    output_path = Path(output_path)
+    frames = np.arange(len(ball_track))
+    x_values = np.array(
+        [np.nan if not has_valid_point(point) else float(point[0]) for point in ball_track]
+    )
+    y_values = np.array(
+        [np.nan if not has_valid_point(point) else float(point[1]) for point in ball_track]
+    )
+
+    fig, left_axis = plt.subplots(figsize=(14, 6))
+    right_axis = left_axis.twinx()
+
+    y_line = left_axis.plot(frames, y_values, color="#1f77b4", linewidth=1.4, label="ball y pixel")
+    x_line = right_axis.plot(frames, x_values, color="#ff7f0e", linewidth=1.1, label="ball x pixel")
+
+    for event in stats.shot_events:
+        left_axis.axvline(event.frame, color="#d62728", linewidth=1.0, alpha=0.8)
+    for event in stats.bounce_events:
+        left_axis.axvline(event.frame, color="#2ca02c", linewidth=1.0, linestyle="--", alpha=0.8)
+
+    shot_proxy = plt.Line2D([0], [0], color="#d62728", linewidth=1.0, label="shot")
+    bounce_proxy = plt.Line2D([0], [0], color="#2ca02c", linewidth=1.0, linestyle="--", label="bounce")
+    lines = [*y_line, *x_line, shot_proxy, bounce_proxy]
+
+    left_axis.set_title("Ball Pixel History")
+    left_axis.set_xlabel("Frame")
+    left_axis.set_ylabel("Y pixel", color="#1f77b4")
+    right_axis.set_ylabel("X pixel", color="#ff7f0e")
+    left_axis.grid(True, axis="x", alpha=0.25)
+    left_axis.legend(lines, [line.get_label() for line in lines], loc="upper right")
+
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
+
+
 def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
     """Run selected analysis stages and return annotated frames plus bounces."""
     frames, fps = read_video(config.input_path)
@@ -633,6 +685,8 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
         )
         bounces = {event.frame for event in stats.bounce_events}
         save_stats(stats, config.stats_path)
+        if config.ball_history_plot_path is not None:
+            save_ball_history_plot(ball_track, stats, config.ball_history_plot_path)
 
     if config.draw_ball_track:
         processed_frames = draw_track(
@@ -692,6 +746,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-point-shots", type=int, default=2)
     parser.add_argument("--min-point-bounces", type=int, default=1)
     parser.add_argument("--keep-debug-scenes", action="store_true")
+    parser.add_argument("--plot-ball-history", action="store_true")
     parser.add_argument("--draw-players", action="store_true")
     parser.add_argument("--draw-court", action="store_true")
     parser.add_argument("--draw-court-keypoints", action="store_true")
@@ -706,16 +761,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def config_from_args(args: argparse.Namespace) -> AnalyzerConfig:
+    compute_stats = (not args.no_stats) or args.plot_ball_history
+    plot_path = args.stats_output.with_name(f"{args.stats_output.stem}_ball_history.png")
     return AnalyzerConfig(
         input_path=args.input,
         output_path=args.output,
         stats_path=args.stats_output,
+        ball_history_plot_path=plot_path if args.plot_ball_history else None,
         point_output_dir=args.split_points_dir,
-        track_players=(not args.no_stats and not args.no_players) or args.draw_players,
-        track_court=(not args.no_stats) or args.draw_court or args.draw_court_keypoints,
+        track_players=(compute_stats and not args.no_players) or args.draw_players,
+        track_court=compute_stats or args.draw_court or args.draw_court_keypoints,
         detect_bounces=not args.no_bounces,
         detect_scene_cuts=(not args.no_scene_cuts) or args.split_points_dir is not None,
-        compute_stats=not args.no_stats,
+        compute_stats=compute_stats,
         use_cache=not args.no_cache,
         draw_ball_track=not args.no_ball_track,
         draw_players=args.draw_players,
@@ -743,6 +801,7 @@ def main() -> None:
             draw_court=args.draw_court,
             draw_court_keypoints=args.draw_court_keypoints,
             keep_debug_scenes=args.keep_debug_scenes,
+            plot_ball_history=args.plot_ball_history,
         )
         print(f"Saved analysis for {len(kept)} played point scene(s) to: {args.analyze_points_dir}")
         return

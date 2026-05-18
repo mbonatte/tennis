@@ -22,6 +22,7 @@ Useful command-line options:
 .\.venv\Scripts\python.exe main.py --draw-court
 .\.venv\Scripts\python.exe main.py --draw-court --draw-players
 .\.venv\Scripts\python.exe main.py --input input.mp4 --output output_debug.mp4
+.\.venv\Scripts\python.exe main.py --input input.mp4 --plot-ball-history
 .\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --split-points-dir points
 .\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --analyze-points-dir point_analysis --draw-court
 .\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --analyze-points-dir point_analysis --keep-debug-scenes
@@ -54,6 +55,7 @@ Useful switches:
 - Set `draw_court_keypoints=True` to render detected court keypoints.
 - Set `draw_court_overlay=True` or run `--draw-court` to render the minimap court overlay. The minimap shows the ball in yellow, bounces in orange, top player as blue `T`, and bottom player as green `B`.
 - Set `input_path=PROJECT_ROOT / "your_video.mp4"` to analyze another file.
+- Run with `--plot-ball-history` to save a debug PNG with ball Y pixel history on the left axis, ball X pixel history on the right axis, red shot markers, and green dashed bounce markers. Single-video runs write `<stats-name>_ball_history.png`; point-analysis runs write per-point plots to `point_analysis/ball_history_plots`.
 - Run with `--split-points-dir points` to stream-split a long compilation into one raw MP4 per detected scene/point without running the full analyzer. Files are named with the point number and source frame range.
 - Run with `--analyze-points-dir point_analysis` to split a compilation, quickly discard very short scenes, analyze the remaining candidates, and keep only scenes that look like played points. Played point videos are written to `point_analysis/point_videos`, and their JSON files are written to `point_analysis/point_stats`.
 - Raw scene clips and rejected clips are temporary by default. Add `--keep-debug-scenes` when you want to inspect `raw_scenes` and `rejected_scenes`.

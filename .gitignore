@@ -12,8 +12,8 @@ court_configurations/
 point_analysis/
 
 # Local media/model artifacts
-input.mp4
-input.png
+*.mp4
+*.png
 weights/
 
 # Tooling
