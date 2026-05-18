@@ -277,15 +277,18 @@ def analyze_point_scenes(
     output_dir: Path | str,
     threshold: float = 0.55,
     min_frames: int = 10,
+    min_analyze_frames: int = 75,
     min_shots: int = 2,
     min_bounces: int = 1,
     draw_players: bool = False,
     draw_court: bool = False,
     draw_court_keypoints: bool = False,
+    keep_debug_scenes: bool = False,
 ) -> list[tuple[Path, Path]]:
     """Split a compilation, analyze each scene, and keep scenes that look like played points."""
     output_dir = Path(output_dir)
-    raw_dir = output_dir / "raw_scenes"
+    existing_raw_dir = output_dir / "raw_scenes"
+    raw_dir = existing_raw_dir if existing_raw_dir.exists() else output_dir / ".scene_work" / "raw_scenes"
     videos_dir = output_dir / "point_videos"
     stats_dir = output_dir / "point_stats"
     rejected_dir = output_dir / "rejected_scenes"
@@ -303,12 +306,12 @@ def analyze_point_scenes(
         )
     videos_dir.mkdir(parents=True, exist_ok=True)
     stats_dir.mkdir(parents=True, exist_ok=True)
-    rejected_dir.mkdir(parents=True, exist_ok=True)
 
     kept = []
     for scene_index, raw_path in enumerate(raw_paths, start=1):
         output_path = videos_dir / raw_path.name
         stats_path = stats_dir / f"{raw_path.stem}.json"
+        scene_frames = _video_frame_count(raw_path)
 
         if stats_path.exists():
             if _stats_look_like_played_point(stats_path, min_shots=min_shots, min_bounces=min_bounces):
@@ -317,13 +320,21 @@ def analyze_point_scenes(
                     kept.append((output_path, stats_path))
                     continue
             else:
-                rejected_path = rejected_dir / raw_path.name
-                raw_path.replace(rejected_path)
+                _discard_scene(raw_path, rejected_dir, keep_debug_scenes)
                 stats_path.unlink()
                 if output_path.exists():
                     output_path.unlink()
-                print(f"Rejected already analyzed non-point scene: {rejected_path.name}")
+                print(f"Rejected already analyzed non-point scene: {raw_path.name}")
                 continue
+
+        if scene_frames is not None and scene_frames < min_analyze_frames:
+            _discard_scene(raw_path, rejected_dir, keep_debug_scenes)
+            if output_path.exists():
+                output_path.unlink()
+            if stats_path.exists():
+                stats_path.unlink()
+            print(f"Rejected short scene without full analysis: {raw_path.name}")
+            continue
 
         print(f"Analyzing scene {scene_index}/{len(raw_paths)}: {raw_path.name}")
 
@@ -350,16 +361,48 @@ def analyze_point_scenes(
 
         if _stats_look_like_played_point(stats_path, min_shots=min_shots, min_bounces=min_bounces):
             kept.append((output_path, stats_path))
+            if not keep_debug_scenes and raw_path.exists():
+                raw_path.unlink()
             continue
 
-        rejected_path = rejected_dir / raw_path.name
-        raw_path.replace(rejected_path)
+        _discard_scene(raw_path, rejected_dir, keep_debug_scenes)
         if output_path.exists():
             output_path.unlink()
         if stats_path.exists():
             stats_path.unlink()
 
+    if not keep_debug_scenes:
+        _remove_empty_parents(raw_dir, stop_at=output_dir)
+
     return kept
+
+
+def _video_frame_count(path: Path) -> int | None:
+    cap = cv2.VideoCapture(str(path))
+    if not cap.isOpened():
+        return None
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+    cap.release()
+    return count
+
+
+def _discard_scene(raw_path: Path, rejected_dir: Path, keep_debug_scenes: bool) -> None:
+    if keep_debug_scenes:
+        rejected_dir.mkdir(parents=True, exist_ok=True)
+        raw_path.replace(rejected_dir / raw_path.name)
+    elif raw_path.exists():
+        raw_path.unlink()
+
+
+def _remove_empty_parents(path: Path, stop_at: Path) -> None:
+    path = path.resolve()
+    stop_at = stop_at.resolve()
+    while path != stop_at and path.exists():
+        try:
+            path.rmdir()
+        except OSError:
+            break
+        path = path.parent
 
 
 def _stats_look_like_played_point(stats_path: Path, min_shots: int, min_bounces: int) -> bool:
@@ -645,8 +688,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--analyze-points-dir", type=Path)
     parser.add_argument("--split-scene-threshold", type=float, default=0.55)
     parser.add_argument("--min-point-frames", type=int, default=10)
+    parser.add_argument("--min-analyze-frames", type=int, default=75)
     parser.add_argument("--min-point-shots", type=int, default=2)
     parser.add_argument("--min-point-bounces", type=int, default=1)
+    parser.add_argument("--keep-debug-scenes", action="store_true")
     parser.add_argument("--draw-players", action="store_true")
     parser.add_argument("--draw-court", action="store_true")
     parser.add_argument("--draw-court-keypoints", action="store_true")
@@ -691,11 +736,13 @@ def main() -> None:
             args.analyze_points_dir,
             threshold=args.split_scene_threshold,
             min_frames=args.min_point_frames,
+            min_analyze_frames=args.min_analyze_frames,
             min_shots=args.min_point_shots,
             min_bounces=args.min_point_bounces,
             draw_players=args.draw_players,
             draw_court=args.draw_court,
             draw_court_keypoints=args.draw_court_keypoints,
+            keep_debug_scenes=args.keep_debug_scenes,
         )
         print(f"Saved analysis for {len(kept)} played point scene(s) to: {args.analyze_points_dir}")
         return
