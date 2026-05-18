@@ -33,6 +33,7 @@ class AnalyzerConfig:
     output_path: Path = PROJECT_ROOT / "output.mp4"
     stats_path: Path = PROJECT_ROOT / "analysis_stats.json"
     cache_dir: Path = PROJECT_ROOT / ".cache"
+    point_output_dir: Path | None = None
 
     # Stats need court projection; caching keeps repeated runs manageable.
     track_players: bool = False
@@ -51,6 +52,7 @@ class AnalyzerConfig:
     draw_stats: bool = True
 
     ball_trace_length: int = 7
+    min_point_frames: int = 10
 
 
 def read_image_as_video(path_image: Path | str) -> tuple[list, int]:
@@ -123,6 +125,149 @@ def save_video(frames: Sequence, path_output_video: Path | str, fps: int) -> Non
         out.write(frame)
 
     out.release()
+
+
+def scene_segments(num_frames: int, scene_cuts: Sequence[int], min_frames: int = 1) -> list[tuple[int, int]]:
+    """Return inclusive-exclusive frame ranges split by hard scene cuts."""
+    cuts = sorted(cut for cut in scene_cuts if 0 < cut < num_frames)
+    starts = [0, *cuts]
+    ends = [*cuts, num_frames]
+    return [
+        (start, end)
+        for start, end in zip(starts, ends)
+        if end - start >= min_frames
+    ]
+
+
+def save_point_videos(
+    frames: Sequence,
+    fps: int,
+    scene_cuts: Sequence[int],
+    output_dir: Path | str,
+    min_frames: int = 10,
+) -> list[Path]:
+    """Save one MP4 per detected point/scene and return output paths."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    output_paths = []
+    segments = scene_segments(len(frames), scene_cuts, min_frames=min_frames)
+    if not segments:
+        segments = [(0, len(frames))]
+
+    for point_index, (start, end) in enumerate(segments, start=1):
+        output_path = output_dir / f"point_{point_index:03d}_frames_{start:06d}_{end - 1:06d}.mp4"
+        save_video(frames[start:end], output_path, fps)
+        output_paths.append(output_path)
+
+    return output_paths
+
+
+def split_video_by_scene(
+    input_path: Path | str,
+    output_dir: Path | str,
+    threshold: float = 0.55,
+    min_frames: int = 10,
+) -> list[Path]:
+    """Stream an input video and write one raw MP4 per detected scene/point."""
+    input_path = Path(input_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    cap = cv2.VideoCapture(str(input_path))
+    if not cap.isOpened():
+        raise FileNotFoundError(f"Could not open video: {input_path}")
+
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or None
+    if width <= 0 or height <= 0:
+        cap.release()
+        raise RuntimeError(f"Could not read video dimensions: {input_path}")
+
+    writer = None
+    previous_hist = None
+    point_index = 1
+    segment_start = 0
+    segment_frames = 0
+    frame_num = 0
+    output_paths = []
+
+    def open_writer(index: int, start: int):
+        path = output_dir / f"point_{index:03d}_frames_{start:06d}.mp4"
+        video_writer = cv2.VideoWriter(
+            str(path),
+            cv2.VideoWriter_fourcc(*"mp4v"),
+            fps,
+            (width, height),
+        )
+        if not video_writer.isOpened():
+            raise RuntimeError(f"Could not open VideoWriter for: {path}")
+        return path, video_writer
+
+    current_path, writer = open_writer(point_index, segment_start)
+
+    try:
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            current_hist = _frame_histogram_from_bgr(frame)
+            is_cut = False
+            if previous_hist is not None:
+                distance = cv2.compareHist(previous_hist, current_hist, cv2.HISTCMP_BHATTACHARYYA)
+                is_cut = distance >= threshold and segment_frames >= min_frames
+
+            if is_cut:
+                writer.release()
+                final_path = _rename_point_video(current_path, segment_start, frame_num - 1)
+                output_paths.append(final_path)
+                point_index += 1
+                segment_start = frame_num
+                segment_frames = 0
+                current_path, writer = open_writer(point_index, segment_start)
+
+            writer.write(frame)
+            segment_frames += 1
+            previous_hist = current_hist
+            frame_num += 1
+            if frame_num % 1000 == 0:
+                if total_frames:
+                    print(f"Split progress: {frame_num}/{total_frames} frames, {point_index} current point(s)")
+                else:
+                    print(f"Split progress: {frame_num} frames, {point_index} current point(s)")
+    finally:
+        cap.release()
+        if writer is not None:
+            writer.release()
+
+    if segment_frames >= min_frames:
+        final_path = _rename_point_video(current_path, segment_start, frame_num - 1)
+        output_paths.append(final_path)
+    elif current_path.exists():
+        current_path.unlink()
+
+    return output_paths
+
+
+def _frame_histogram_from_bgr(frame):
+    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    hist = cv2.calcHist([hsv], [0, 1], None, [32, 32], [0, 180, 0, 256])
+    cv2.normalize(hist, hist)
+    return hist
+
+
+def _rename_point_video(path: Path, start_frame: int, end_frame: int) -> Path:
+    final_path = path.with_name(
+        path.stem + f"_{end_frame:06d}.mp4"
+    )
+    if final_path != path:
+        if final_path.exists():
+            final_path.unlink()
+        path.rename(final_path)
+    return final_path
 
 
 def create_player_tracker() -> HybridPlayerTracker:
@@ -364,6 +509,14 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
         processed_frames = draw_frame_numbers(processed_frames)
 
     save_video(processed_frames, config.output_path, fps)
+    if config.point_output_dir is not None:
+        save_point_videos(
+            processed_frames,
+            fps,
+            scene_cuts,
+            config.point_output_dir,
+            min_frames=config.min_point_frames,
+        )
     return processed_frames, bounces
 
 
@@ -372,6 +525,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input", type=Path, default=PROJECT_ROOT / "input.mp4")
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "output.mp4")
     parser.add_argument("--stats-output", type=Path, default=PROJECT_ROOT / "analysis_stats.json")
+    parser.add_argument("--split-points-dir", type=Path)
+    parser.add_argument("--split-scene-threshold", type=float, default=0.55)
+    parser.add_argument("--min-point-frames", type=int, default=10)
     parser.add_argument("--draw-players", action="store_true")
     parser.add_argument("--draw-court", action="store_true")
     parser.add_argument("--draw-court-keypoints", action="store_true")
@@ -390,10 +546,11 @@ def config_from_args(args: argparse.Namespace) -> AnalyzerConfig:
         input_path=args.input,
         output_path=args.output,
         stats_path=args.stats_output,
+        point_output_dir=args.split_points_dir,
         track_players=(not args.no_stats and not args.no_players) or args.draw_players,
         track_court=(not args.no_stats) or args.draw_court or args.draw_court_keypoints,
         detect_bounces=not args.no_bounces,
-        detect_scene_cuts=not args.no_scene_cuts,
+        detect_scene_cuts=(not args.no_scene_cuts) or args.split_points_dir is not None,
         compute_stats=not args.no_stats,
         use_cache=not args.no_cache,
         draw_ball_track=not args.no_ball_track,
@@ -403,11 +560,23 @@ def config_from_args(args: argparse.Namespace) -> AnalyzerConfig:
         draw_bounces=not args.no_bounces,
         draw_frame_number=not args.no_frame_number,
         draw_stats=not args.no_stats,
+        min_point_frames=args.min_point_frames,
     )
 
 
 def main() -> None:
-    config = config_from_args(parse_args())
+    args = parse_args()
+    if args.split_points_dir is not None:
+        output_paths = split_video_by_scene(
+            args.input,
+            args.split_points_dir,
+            threshold=args.split_scene_threshold,
+            min_frames=args.min_point_frames,
+        )
+        print(f"Saved {len(output_paths)} point video(s) to: {args.split_points_dir}")
+        return
+
+    config = config_from_args(args)
     _, bounces = analyze_video(config)
 
     if bounces:
@@ -416,7 +585,6 @@ def main() -> None:
         print("No bounces detected.")
 
     print(f"Saved output video to: {config.output_path}")
-
 
 if __name__ == "__main__":
     main()
