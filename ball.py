@@ -10,16 +10,21 @@ import torch
 from BallTrack.ball_tracker import load_model, infer_model_batched, remove_outliers, split_track, interpolation
 
 
+_TORCH_THREADS_CONFIGURED = False
+
+
 def track_ball(frames, extrapolation=True):
+    global _TORCH_THREADS_CONFIGURED
     project_root = Path(__file__).resolve().parent
 
     model_path = project_root / "weights" / "tracknet_model.pt"
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cpu_threads = max(1, (os.cpu_count() or 4) - 1)
-    
-    torch.set_num_threads(cpu_threads)
-    torch.set_num_interop_threads(1)
+    if not _TORCH_THREADS_CONFIGURED:
+        cpu_threads = max(1, (os.cpu_count() or 4) - 1)
+        torch.set_num_threads(cpu_threads)
+        torch.set_num_interop_threads(1)
+        _TORCH_THREADS_CONFIGURED = True
 
     print(f"Using device: {device}")
 
