@@ -32,6 +32,7 @@ class BounceEvent:
 @dataclass(frozen=True)
 class PlayerStats:
     shots: int = 0
+    total_distance_m: float | None = None
     average_speed_kmh: float | None = None
     max_speed_kmh: float | None = None
 
@@ -916,6 +917,33 @@ def _segment_speeds(
     return speeds
 
 
+def _total_distance_m(
+    positions,
+    scales: tuple[float, float] | None,
+    max_speed_kmh: float | None,
+    fps: int,
+):
+    if scales is None:
+        return None
+
+    total_distance = 0.0
+    for previous, current in zip(positions, positions[1:]):
+        if previous is None or current is None:
+            continue
+
+        dx = (current[0] - previous[0]) * scales[0]
+        dy = (current[1] - previous[1]) * scales[1]
+        distance = float(np.sqrt(dx * dx + dy * dy))
+
+        speed_kmh = distance * fps * 3.6
+        if max_speed_kmh is not None and speed_kmh > max_speed_kmh:
+            continue
+
+        total_distance += distance
+
+    return total_distance
+
+
 def _interpolate_axis(positions, axis: int):
     values = np.array(
         [np.nan if point is None else point[axis] for point in positions],
@@ -1041,8 +1069,10 @@ def _compute_player_stats(player_positions, fps, scales, shot_events):
     for role in roles:
         role_positions = [frame.get(role) for frame in player_positions]
         speeds = _segment_speeds(role_positions, fps, scales, max_speed_kmh=45)
+        distance_m = _total_distance_m(role_positions, scales, max_speed_kmh=45, fps=fps)
         stats[role] = PlayerStats(
             shots=shot_counts[role],
+            total_distance_m=distance_m,
             average_speed_kmh=_mean(speeds),
             max_speed_kmh=_max(speeds),
         )
@@ -1073,6 +1103,7 @@ def _draw_stats_panel(frame, stats: MatchStats) -> None:
         label = role.replace("_", " ")
         lines.append(
             f"{label}: shots {player_stats.shots}, "
+            f"dist {_format_distance(player_stats.total_distance_m)}, "
             f"avg/max {_format_speed(player_stats.average_speed_kmh)} / "
             f"{_format_speed(player_stats.max_speed_kmh)}"
         )
@@ -1096,6 +1127,12 @@ def _format_speed(value):
     if value is None:
         return "n/a"
     return f"{value:.1f} km/h"
+
+
+def _format_distance(value):
+    if value is None:
+        return "n/a"
+    return f"{value:.1f} m"
 
 
 def _format_bounce_summary(bounce_events: list[BounceEvent]):
