@@ -167,7 +167,7 @@ class BasePlayerTracker:
         for det in detections:
             _, cy = det["center"]
 
-            if cy < mid_y:
+            if cy < mid_y and self._is_top_player_candidate(det, frame_shape):
                 top_candidates.append(det)
             else:
                 bottom_candidates.append(det)
@@ -203,6 +203,20 @@ class BasePlayerTracker:
         """
         area_score = min(det["area"] / 50000, 1.0)
         return det["conf"] * 0.7 + area_score * 0.3
+
+    def _is_top_player_candidate(self, det, frame_shape):
+        frame_h, frame_w = frame_shape[:2]
+        x1, _, x2, y2 = det["bbox"]
+        center_x, _ = det["center"]
+        if y2 < frame_h * 0.18:
+            return False
+        if y2 > frame_h * 0.50:
+            return False
+        if center_x < frame_w * 0.08 or center_x > frame_w * 0.92:
+            return False
+        if x2 <= x1:
+            return False
+        return True
 
     def _extract_detections(self, result):
         """
@@ -720,6 +734,8 @@ class HybridPlayerTracker(BoxPlayerTracker):
         x1, _, x2, y2 = player.bbox
         box_height = y2 - player.bbox[1]
         center_x, _ = player.center
+        if y2 < frame_h * 0.18:
+            return False
         if y2 > frame_h * 0.58:
             return False
         if center_x < frame_w * 0.08 or center_x > frame_w * 0.92:

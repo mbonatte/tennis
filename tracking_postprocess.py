@@ -72,6 +72,8 @@ def _is_valid_top_player(player, top_limit_y, side_margin_x, frame_w):
     x1, y1, x2, y2 = player.bbox
     foot_y = y2
     center_x, _ = player.center
+    if foot_y < top_limit_y * 0.36:
+        return False
     if foot_y > top_limit_y:
         return False
     if center_x < side_margin_x or center_x > frame_w - side_margin_x:
