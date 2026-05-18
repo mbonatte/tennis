@@ -239,6 +239,41 @@ def refine_bounce_frames(
             continue
         refined.add(frame)
 
+    return _suppress_duplicate_pre_shot_bounces(refined, shot_events, fps)
+
+
+def _suppress_duplicate_pre_shot_bounces(
+    bounces: set[int],
+    shot_events: list[ShotEvent],
+    fps: int,
+) -> set[int]:
+    refined = set(bounces)
+    min_gap = max(5, int(fps * 0.18))
+    max_gap = max(18, int(fps * 0.75))
+    preferred_gap = max(9, int(fps * 0.40))
+
+    for shot in shot_events[1:]:
+        candidates = [
+            frame
+            for frame in refined
+            if min_gap <= shot.frame - frame <= max_gap
+        ]
+        close_duplicates = [
+            frame
+            for frame in refined
+            if 0 < shot.frame - frame < min_gap
+        ]
+
+        if not candidates:
+            continue
+
+        best = min(candidates, key=lambda frame: abs((shot.frame - frame) - preferred_gap))
+        for frame in candidates:
+            if frame != best:
+                refined.discard(frame)
+        for frame in close_duplicates:
+            refined.discard(frame)
+
     return refined
 
 
@@ -263,6 +298,7 @@ def refine_shot_events_from_bounces(
         and _has_enough_track_context(ball_positions, event.frame, radius=4)
     ]
     filtered = _drop_pre_serve_toss_events(filtered, bounces, ball_positions, fps)
+    filtered = _drop_in_flight_pre_bounce_shots(filtered, bounces, fps)
     filtered = _ensure_initial_serve_shot(filtered, bounces, ball_positions, projected_ball_positions, player_positions, fps)
     filtered.extend(
         _recover_shots_from_rejected_bounces(
@@ -325,6 +361,34 @@ def _drop_pre_serve_toss_events(
         for event in shot_events
         if event.frame >= keep_from or event.frame > first_bounce
     ]
+
+
+def _drop_in_flight_pre_bounce_shots(
+    shot_events: list[ShotEvent],
+    bounces: set[int],
+    fps: int,
+) -> list[ShotEvent]:
+    if not bounces:
+        return shot_events
+
+    max_pre_bounce_gap = max(8, int(fps * 0.55))
+    max_post_bounce_gap = max(16, int(fps * 0.8))
+    kept = []
+
+    for event in sorted(shot_events, key=lambda shot: shot.frame):
+        previous_bounces = [frame for frame in bounces if frame < event.frame]
+        next_bounces = [frame for frame in bounces if frame > event.frame]
+        previous_gap = event.frame - max(previous_bounces) if previous_bounces else None
+        next_gap = min(next_bounces) - event.frame if next_bounces else None
+
+        is_before_next_bounce = next_gap is not None and next_gap <= max_pre_bounce_gap
+        is_not_after_recent_bounce = previous_gap is None or previous_gap > max_post_bounce_gap
+        if is_before_next_bounce and is_not_after_recent_bounce:
+            continue
+
+        kept.append(event)
+
+    return kept
 
 
 def _recover_shots_from_rejected_bounces(
@@ -499,7 +563,7 @@ def _filter_projected_bounce_outliers(bounces: set[int], projected_ball_position
 
 
 def _has_shot_after_bounce(shot_events: list[ShotEvent], bounce_frame: int, fps: int):
-    min_after = max(5, int(fps * 0.16))
+    min_after = max(2, int(fps * 0.08))
     max_after = max(24, int(fps * 0.8))
     return any(min_after <= event.frame - bounce_frame <= max_after for event in shot_events)
 
@@ -511,6 +575,7 @@ def _estimate_post_bounce_hit_frame(ball_positions, bounce_frame: int, fps: int)
         return None
 
     candidates = []
+    preferred_offset = max(9, int(fps * 0.64))
     for frame_num in range(start, end + 1):
         point = _point_or_none(ball_positions[frame_num])
         if point is None:
@@ -521,7 +586,8 @@ def _estimate_post_bounce_hit_frame(ball_positions, bounce_frame: int, fps: int)
         if prev_v is None or next_v is None:
             continue
 
-        turn_score = abs(next_v - prev_v)
+        offset_penalty = abs((frame_num - bounce_frame) - preferred_offset)
+        turn_score = abs(next_v - prev_v) - offset_penalty * 1.2
         candidates.append((turn_score, frame_num))
 
     if not candidates:

@@ -169,7 +169,7 @@ class BasePlayerTracker:
 
             if cy < mid_y and self._is_top_player_candidate(det, frame_shape):
                 top_candidates.append(det)
-            else:
+            elif cy >= mid_y and self._is_bottom_player_candidate(det, frame_shape):
                 bottom_candidates.append(det)
 
         top_player = max(top_candidates, key=self._score_detection, default=None)
@@ -224,6 +224,16 @@ class BasePlayerTracker:
 
     def _top_player_side_margin_x(self, frame_w):
         return frame_w * 0.20
+
+    def _is_bottom_player_candidate(self, det, frame_shape):
+        frame_h, frame_w = frame_shape[:2]
+        _, _, _, y2 = det["bbox"]
+        center_x, _ = det["center"]
+        if y2 < frame_h * 0.50:
+            return False
+        if center_x < frame_w * 0.20 or center_x > frame_w * 0.98:
+            return False
+        return True
 
     def _extract_detections(self, result):
         """
