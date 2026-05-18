@@ -52,6 +52,7 @@ class BounceDetector:
         return features, list(labels['frame'])
     
     def predict(self, x_ball, y_ball, smooth=True):
+        x_ball, y_ball = self._sanitize_ball_track(x_ball, y_ball)
         if smooth:
             x_ball, y_ball = self.smooth_predictions(x_ball, y_ball)
         
@@ -64,16 +65,16 @@ class BounceDetector:
         return set(frames_bounce)
     
     def smooth_predictions(self, x_ball, y_ball):
-        is_none = [int(x is None) for x in x_ball]
+        is_none = [int(not self._has_point(x, y)) for x, y in zip(x_ball, y_ball)]
         interp = 5
         counter = 0
         for num in range(interp, len(x_ball)-1):
-            if not x_ball[num] and sum(is_none[num-interp:num]) == 0 and counter < 3:
+            if not self._has_point(x_ball[num], y_ball[num]) and sum(is_none[num-interp:num]) == 0 and counter < 3:
                 x_ext, y_ext = self.extrapolate(x_ball[num-interp:num], y_ball[num-interp:num])
                 x_ball[num] = x_ext
                 y_ball[num] = y_ext
                 is_none[num] = 0
-                if x_ball[num+1]:
+                if self._has_point(x_ball[num+1], y_ball[num+1]):
                     dist = distance.euclidean((x_ext, y_ext), (x_ball[num+1], y_ball[num+1]))
                     if dist > 80:
                         x_ball[num+1], y_ball[num+1], is_none[num+1] = None, None, 1
@@ -89,6 +90,23 @@ class BounceDetector:
         func_y = CubicSpline(xs, y_coords, bc_type='natural')
         y_ext = func_y(len(x_coords))
         return float(x_ext), float(y_ext)    
+
+    def _sanitize_ball_track(self, x_ball, y_ball):
+        x_clean = []
+        y_clean = []
+        for x, y in zip(x_ball, y_ball):
+            if self._has_point(x, y):
+                x_clean.append(float(x))
+                y_clean.append(float(y))
+            else:
+                x_clean.append(None)
+                y_clean.append(None)
+        return x_clean, y_clean
+
+    def _has_point(self, x, y):
+        if x is None or y is None:
+            return False
+        return np.isfinite(x) and np.isfinite(y)
 
     def postprocess(self, ind_bounce, preds):
         ind_bounce_filtered = [ind_bounce[0]]
