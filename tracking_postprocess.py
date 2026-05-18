@@ -11,6 +11,7 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
 
     frame_h, frame_w = frame_shape[:2]
     top_limit_y = frame_h * 0.50
+    top_min_y = _top_player_min_foot_y(frame_h)
     side_margin_x = frame_w * 0.08
     max_top_center_jump = frame_w * 0.16
 
@@ -29,6 +30,7 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
         if top_player is not None and not _is_valid_top_player(
             top_player,
             top_limit_y=top_limit_y,
+            top_min_y=top_min_y,
             side_margin_x=side_margin_x,
             frame_w=frame_w,
         ):
@@ -68,11 +70,11 @@ def stabilize_player_roles(player_tracks: Sequence[list], frame_shape) -> list[l
     return stabilized_tracks
 
 
-def _is_valid_top_player(player, top_limit_y, side_margin_x, frame_w):
+def _is_valid_top_player(player, top_limit_y, top_min_y, side_margin_x, frame_w):
     x1, y1, x2, y2 = player.bbox
     foot_y = y2
     center_x, _ = player.center
-    if foot_y < top_limit_y * 0.36:
+    if foot_y < top_min_y:
         return False
     if foot_y > top_limit_y:
         return False
@@ -81,6 +83,11 @@ def _is_valid_top_player(player, top_limit_y, side_margin_x, frame_w):
     if y2 - y1 < top_limit_y * 0.12:
         return False
     return True
+
+
+def _top_player_min_foot_y(frame_h):
+    high_res_adjustment = max(0.0, min((frame_h - 720) / 360, 1.0)) * 0.04
+    return frame_h * (0.18 + high_res_adjustment)
 
 
 def _is_valid_bottom_player(player, top_limit_y):

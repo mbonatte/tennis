@@ -135,6 +135,21 @@ def create_player_tracker() -> HybridPlayerTracker:
     )
 
 
+def track_players_by_scene(frames: Sequence, scene_cuts: Sequence[int] | None = None) -> list:
+    """Track players independently per scene so IDs and anchors do not cross cuts."""
+    scene_cuts = sorted(cut for cut in (scene_cuts or []) if 0 < cut < len(frames))
+    starts = [0, *scene_cuts]
+    ends = [*scene_cuts, len(frames)]
+    player_tracks = []
+
+    for start, end in zip(starts, ends):
+        player_tracker = create_player_tracker()
+        segment_tracks, _ = player_tracker.track_frames(frames[start:end])
+        player_tracks.extend(segment_tracks)
+
+    return player_tracks
+
+
 def detect_ball_bounces(ball_track: Sequence[tuple]) -> set[int]:
     """Predict which frame numbers contain a bounce from the ball trajectory."""
     bounce_detector = BounceDetector(str(PROJECT_ROOT / "weights" / "bounce_model.cbm"))
@@ -271,8 +286,8 @@ def analyze_video(config: AnalyzerConfig) -> tuple[list, set[int]]:
         player_tracker = create_player_tracker()
         player_tracks = load_or_compute(
             config,
-            "players_v8_top_recovery",
-            lambda: player_tracker.track_frames(frames)[0],
+            "players_v9_scene_top_band",
+            lambda: track_players_by_scene(frames, scene_cuts),
         )
         player_tracks = stabilize_player_roles(player_tracks, frames[0].shape)
         if config.draw_players:
