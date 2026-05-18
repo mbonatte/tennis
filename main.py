@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence
 
 import cv2
+import numpy as np
 
 from analysis import (
     compute_match_stats,
@@ -290,12 +291,16 @@ def analyze_point_scenes(
     rejected_dir = output_dir / "rejected_scenes"
     cache_dir = output_dir / ".cache"
 
-    raw_paths = split_video_by_scene(
-        input_path,
-        raw_dir,
-        threshold=threshold,
-        min_frames=min_frames,
-    )
+    raw_paths = sorted(raw_dir.glob("*.mp4")) if raw_dir.exists() else []
+    if raw_paths:
+        print(f"Reusing {len(raw_paths)} existing raw scene clip(s) from: {raw_dir}")
+    else:
+        raw_paths = split_video_by_scene(
+            input_path,
+            raw_dir,
+            threshold=threshold,
+            min_frames=min_frames,
+        )
     videos_dir.mkdir(parents=True, exist_ok=True)
     stats_dir.mkdir(parents=True, exist_ok=True)
     rejected_dir.mkdir(parents=True, exist_ok=True)
@@ -304,6 +309,22 @@ def analyze_point_scenes(
     for scene_index, raw_path in enumerate(raw_paths, start=1):
         output_path = videos_dir / raw_path.name
         stats_path = stats_dir / f"{raw_path.stem}.json"
+
+        if stats_path.exists():
+            if _stats_look_like_played_point(stats_path, min_shots=min_shots, min_bounces=min_bounces):
+                if output_path.exists():
+                    print(f"Skipping already analyzed point scene: {raw_path.name}")
+                    kept.append((output_path, stats_path))
+                    continue
+            else:
+                rejected_path = rejected_dir / raw_path.name
+                raw_path.replace(rejected_path)
+                stats_path.unlink()
+                if output_path.exists():
+                    output_path.unlink()
+                print(f"Rejected already analyzed non-point scene: {rejected_path.name}")
+                continue
+
         print(f"Analyzing scene {scene_index}/{len(raw_paths)}: {raw_path.name}")
 
         scene_config = AnalyzerConfig(
@@ -431,7 +452,7 @@ def draw_bounce_markers(frames: Sequence, ball_track: Sequence[tuple], bounces: 
             point = ball_track[frame_num]
             if point[0] is None or point[1] is None:
                 point = interpolate_point(ball_track, frame_num, max_gap=8)
-            if point[0] is not None and point[1] is not None:
+            if has_valid_point(point):
                 x = int(point[0])
                 y = int(point[1])
                 cv2.circle(annotated, (x, y), 14, (0, 165, 255), 3)
@@ -465,6 +486,8 @@ def interpolate_point(points: Sequence, frame_num: int, max_gap: int):
     t = (frame_num - before_frame) / frame_span
     x = before_point[0] + (after_point[0] - before_point[0]) * t
     y = before_point[1] + (after_point[1] - before_point[1]) * t
+    if not has_valid_point((x, y)):
+        return (None, None)
     return (x, y)
 
 
@@ -473,11 +496,17 @@ def nearest_valid_point(points: Sequence, start: int, step: int, max_steps: int)
     checked = 0
     while 0 <= frame < len(points) and checked < max_steps:
         point = points[frame]
-        if point is not None and point[0] is not None and point[1] is not None:
+        if has_valid_point(point):
             return frame, point
         frame += step
         checked += 1
     return None
+
+
+def has_valid_point(point) -> bool:
+    if point is None or point[0] is None or point[1] is None:
+        return False
+    return bool(np.isfinite(point[0]) and np.isfinite(point[1]))
 
 
 def draw_frame_numbers(frames: Sequence) -> list:
