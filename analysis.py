@@ -150,6 +150,7 @@ def compute_match_stats(
         fps,
         projected_bounce_positions=ball_positions,
     )
+    shot_events = enforce_rally_player_alternation(shot_events)
     bounces = refine_bounce_frames(
         bounces,
         shot_detection_positions,
@@ -168,6 +169,34 @@ def compute_match_stats(
         max_ball_speed_kmh=_max(ball_speeds),
         scene_cuts=scene_cuts or [],
     )
+
+
+def enforce_rally_player_alternation(shot_events: list[ShotEvent]) -> list[ShotEvent]:
+    """Correct ambiguous player ownership by alternating consecutive rally hits."""
+    corrected = []
+    last_role = None
+
+    for event in sorted(shot_events, key=lambda shot: shot.frame):
+        role = event.player_role
+        if role in {"top_player", "bottom_player"} and role == last_role:
+            role = _opposite_player(role)
+
+        corrected_event = ShotEvent(
+            frame=event.frame,
+            player_role=role,
+            ball_speed_kmh=event.ball_speed_kmh,
+            reason=event.reason if role == event.player_role else f"{event.reason}_alternation_corrected",
+        )
+        corrected.append(corrected_event)
+
+        if corrected_event.player_role in {"top_player", "bottom_player"}:
+            last_role = corrected_event.player_role
+
+    return corrected
+
+
+def _opposite_player(role: str):
+    return "bottom_player" if role == "top_player" else "top_player"
 
 
 def refine_bounce_frames(
