@@ -14,7 +14,14 @@ from tennis_analyzer.schemas import AnalysisOptions, PipelineOptions
 def test_real_models_on_tiny_video(sample_video: Path, tmp_path: Path):
     model_root = Path(os.environ.get("MODEL_ROOT", "models"))
     options = PipelineOptions(
-        analysis=AnalysisOptions(ball_tracking=True, court_detection=True, bounce_detection=True, statistics=True),
+        analysis=AnalysisOptions(
+            ball_tracking=True,
+            court_detection=True,
+            player_tracking=True,
+            pose_tracking=True,
+            bounce_detection=True,
+            statistics=True,
+        ),
         chunk_size=16,
         device=os.environ.get("DEVICE", "cpu"),
     )

@@ -34,7 +34,7 @@ ml = [
   "torch==2.8.0",
   "torchvision==0.23.0",
   "tqdm==4.67.1",
-  "ultralytics==8.3.221",
+  "ultralytics==8.4.56",
 ]
 dev = [
   "numpy==1.26.4",
