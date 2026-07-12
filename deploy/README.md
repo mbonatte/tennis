@@ -115,8 +115,10 @@ docker compose exec postgres psql -U tennis -d tennis
 # Enter the current POSTGRES_PASSWORD twice, then:
 \q
 
-docker compose restart web worker
+docker compose up -d --force-recreate
 docker compose ps
 ```
+
+Use `up --force-recreate`, not `restart`, after editing `.env`: a restart preserves the container's old environment. Named database, Redis, and job-data volumes remain attached and are not deleted by this command.
 
 Alternatively, restore the original password in `.env`. For a brand-new deployment with no data worth preserving, you may stop the stack and delete only its PostgreSQL volume before starting again. That is destructive; verify the exact volume with `docker volume ls` and never use `docker compose down -v` when job or Redis data must be retained.
