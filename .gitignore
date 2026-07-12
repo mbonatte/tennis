@@ -1,21 +1,64 @@
-.cache/
-.venv/
+# Python and tools
 __pycache__/
 *.py[cod]
-
-# Generated analysis outputs
-analysis_stats.json
-frames/
-output*.mp4
-tracked_output.mp4
-court_configurations/
-point_analysis/
-
-# Local media/model artifacts
-*.mp4
-*.png
-weights/
-
-# Tooling
+*.egg-info/
+.venv/
+venv/
 .pytest_cache/
+.ruff_cache/
 .mypy_cache/
+.coverage
+htmlcov/
+.cache/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime data
+data/*
+!data/.gitkeep
+uploads/
+jobs/
+logs/
+*.log
+*.sqlite*
+*.db
+postgres-data/
+redis-data/
+
+# Models are configured/downloaded locally
+weights/
+models/*
+!models/README.md
+!deploy/models/.gitkeep
+*.pt
+*.pth
+*.onnx
+*.cbm
+
+# Generated media and analysis artifacts
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.png
+analysis_stats*.json
+frames/
+point_analysis/
+court_configurations/
+plots/
+tmp/
+temp/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

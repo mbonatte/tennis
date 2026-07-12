@@ -1,0 +1,4 @@
+{% extends "base.html" %}
+{% block title %}Recent analyses · Tennis Analyzer{% endblock %}
+{% block content %}<div class="heading"><div><h1>Recent analyses</h1><p>Jobs persist across web restarts.</p></div><a class="button" href="/">New analysis</a></div>
+<section class="card table-wrap"><table><thead><tr><th>Filename</th><th>Status</th><th>Progress</th><th>Created</th><th></th></tr></thead><tbody>{% for job in jobs %}<tr><td>{{ job.original_filename }}</td><td><span class="badge">{{ job.status.value }}</span></td><td>{{ job.progress }}%</td><td>{{ job.created_at }}</td><td><a href="/jobs/{{ job.public_id }}">View</a></td></tr>{% else %}<tr><td colspan="5">No analyses yet.</td></tr>{% endfor %}</tbody></table></section>{% endblock %}

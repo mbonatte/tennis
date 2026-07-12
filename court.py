@@ -9,8 +9,8 @@ from court_detection_net import CourtDetectorNet
 from court_reference import CourtReference
 
 
-def track_court(frames, model_path="weights/tennis_court.pt"):
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+def track_court(frames, model_path="weights/tennis_court.pt", device_name=None):
+    device = device_name or ('cuda' if torch.cuda.is_available() else 'cpu')
     court_detector = CourtDetectorNet(model_path, device)
     homography_matrices, kps_court = court_detector.infer_model(frames)
 
@@ -29,8 +29,9 @@ def draw_court(
     output_frames = []
     bounces = bounces or set()
 
-    width_minimap = 166
-    height_minimap = 350
+    frame_height, frame_width = frames[0].shape[:2]
+    width_minimap = min(166, max(60, frame_width // 4))
+    height_minimap = min(350, max(100, frame_height - 60))
     
     for frame_num, (frame, homography_matrix, kps_court) in enumerate(
         zip(frames, homography_matrices, kps_courts)
@@ -90,7 +91,10 @@ def draw_court(
                     )
 
         minimap = cv2.resize(minimap, (width_minimap, height_minimap))
-        img_res[30:(30 + height_minimap), (width - 30 - width_minimap):(width - 30), :] = minimap
+        top = max(0, min(30, height - height_minimap))
+        right = max(width_minimap, width - 30)
+        left = right - width_minimap
+        img_res[top:(top + height_minimap), left:right, :] = minimap
         output_frames.append(img_res)
     return output_frames
 

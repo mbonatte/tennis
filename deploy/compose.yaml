@@ -1,0 +1,105 @@
+name: tennis-analyzer
+
+x-app: &app
+  image: ${APP_IMAGE:-ghcr.io/mbonatte/tennis:latest}
+  pull_policy: always
+  env_file: ${ENV_FILE:-.env}
+  restart: unless-stopped
+  stop_grace_period: 45s
+  volumes:
+    - job-data:/app/data
+    - ./models:/app/models:ro
+  logging: &logging
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  migrate:
+    <<: *app
+    profiles: [tools]
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+
+  web:
+    <<: *app
+    container_name: tennis-web
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+    expose: ["8000"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [backend, proxy]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  worker:
+    <<: *app
+    command: ["sh", "-c", "exec rq worker-pool --url \"$${REDIS_URL}\" --num-workers \"$${WORKER_CONCURRENCY:-1}\" analysis"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from redis import Redis; assert Redis.from_url(os.environ['REDIS_URL']).ping()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  postgres:
+    image: postgres:17.2-alpine
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      POSTGRES_DB: tennis
+      POSTGRES_USER: tennis
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tennis -d tennis"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+  redis:
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    stop_grace_period: 30s
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  job-data:
+
+networks:
+  backend:
+    internal: true
+  proxy:
+    external: true

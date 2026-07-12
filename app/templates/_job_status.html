@@ -1,0 +1,6 @@
+<section id="job-status" class="card status {{ job.status.value }}">
+  <div class="status-line"><span class="badge">{{ job.status.value }}</span><strong>{{ job.current_stage.replace('_', ' ') }}</strong><span>{{ job.progress }}%</span></div>
+  <progress max="100" value="{{ job.progress }}">{{ job.progress }}%</progress>
+  {% if job.error_message %}<div class="error"><strong>Processing failed</strong><p>{{ job.error_message }}</p></div>{% endif %}
+  {% if job.status.value in ['queued', 'running'] %}<form action="/jobs/{{ job.public_id }}/cancel" method="post"><button class="secondary">Cancel</button></form>{% endif %}
+</section>

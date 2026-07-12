@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Tennis Analyzer{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header><nav><a class="brand" href="/">Tennis Analyzer</a><a href="/jobs">Recent analyses</a></nav></header>
+  <main>{% block content %}{% endblock %}</main>
+  <footer>Single-server MVP · Event and speed estimates are experimental.</footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

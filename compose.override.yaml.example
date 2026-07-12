@@ -1,0 +1,6 @@
+services:
+  web:
+    ports: ["8000:8000"]
+  worker:
+    environment:
+      LOG_LEVEL: DEBUG

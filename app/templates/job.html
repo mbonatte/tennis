@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}{{ job.original_filename }} · Tennis Analyzer{% endblock %}
+{% block content %}
+<a href="/jobs">← Recent analyses</a>
+<h1>{{ job.original_filename }}</h1>
+{% include "_job_status.html" %}
+<section class="card"><h2>Video</h2><dl><dt>Resolution</dt><dd>{{ job.video_width }} × {{ job.video_height }}</dd><dt>Duration</dt><dd>{{ '%.1f'|format(job.video_duration) }} seconds</dd><dt>Codec</dt><dd>{{ job.video_codec }}</dd><dt>Created</dt><dd>{{ job.created_at }}</dd>{% if job.completed_at %}<dt>Completed</dt><dd>{{ job.completed_at }}</dd>{% endif %}</dl></section>
+<section class="card"><h2>Selected options</h2><div class="chips">{% for group, options in job.submitted_options.items() %}{% for name, enabled in options.items() %}{% if enabled %}<span>{{ name.replace('_', ' ') }}</span>{% endif %}{% endfor %}{% endfor %}</div></section>
+{% if job.status.value == 'completed' and result %}
+<section class="card"><h2>Analyzed video</h2><video controls preload="metadata" src="/jobs/{{ job.public_id }}/files/video"></video><div class="actions"><a class="button" href="/jobs/{{ job.public_id }}/files/video?download=true">Download MP4</a><a class="button secondary" href="/jobs/{{ job.public_id }}/files/json">Download JSON</a></div></section>
+<section class="card"><h2>Experimental summary</h2><div class="metrics">{% for name, value in result.summary.items() %}<div><strong>{{ value if value is not none else '—' }}</strong><span>{{ name.replace('_', ' ') }}</span></div>{% endfor %}</div></section>
+{% if result.points %}<section class="card"><h2>Analyzed points</h2><div class="chips">{% for point in result.points %}<a class="button secondary" href="/jobs/{{ job.public_id }}/points/{{ point.number }}">Point {{ point.number }} · frames {{ point.start_frame }}–{{ point.end_frame }}</a>{% endfor %}</div></section>{% endif %}
+<div class="columns"><section class="card"><h2>Shots ({{ result.shots|length }})</h2>{% if result.shots %}<div class="table-wrap"><table><thead><tr><th>Frame</th><th>Player</th><th>Speed</th></tr></thead><tbody>{% for event in result.shots %}<tr><td>{{ event.frame }}</td><td>{{ event.player_role or 'unknown' }}</td><td>{{ event.ball_speed_kmh or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p>No shots detected.</p>{% endif %}</section>
+<section class="card"><h2>Bounces ({{ result.bounces|length }})</h2>{% if result.bounces %}<div class="table-wrap"><table><thead><tr><th>Frame</th><th>Call</th><th>Region</th></tr></thead><tbody>{% for event in result.bounces %}<tr><td>{{ event.frame }}</td><td>{{ event.in_out or event.classification or '—' }}</td><td>{{ event.court_region or '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p>No bounces detected.</p>{% endif %}</section></div>
+{% endif %}
+{% if job.status.value not in ['queued', 'running'] %}<form class="danger-zone" action="/jobs/{{ job.public_id }}/delete" method="post" onsubmit="return confirm('Delete this analysis and all of its files?')"><button class="danger">Delete analysis</button></form>{% endif %}
+{% endblock %}
+{% block scripts %}{% if job.status.value in ['queued', 'running'] %}<script>setTimeout(() => location.reload(), 3000);</script>{% endif %}{% endblock %}

@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tennis-analyzer"
+version = "0.1.0"
+description = "Background tennis video analysis web application"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "alembic==1.14.1",
+  "fastapi==0.115.7",
+  "httpx==0.28.1",
+  "jinja2==3.1.6",
+  "psycopg[binary]==3.2.4",
+  "pydantic-settings==2.11.0",
+  "python-multipart==0.0.20",
+  "redis==5.2.1",
+  "rq==2.1.0",
+  "sqlalchemy==2.0.38",
+  "uvicorn[standard]==0.34.0",
+]
+
+[project.optional-dependencies]
+ml = [
+  "catboost==1.2.8",
+  "matplotlib==3.10.0",
+  "numpy==1.26.4",
+  "opencv-python-headless==4.11.0.86",
+  "pandas==2.2.3",
+  "scipy==1.15.1",
+  "sympy==1.13.3",
+  "torch==2.8.0",
+  "torchvision==0.23.0",
+  "tqdm==4.67.1",
+  "ultralytics==8.3.221",
+]
+dev = [
+  "numpy==1.26.4",
+  "opencv-python-headless==4.11.0.86",
+  "pytest==8.3.4",
+  "pytest-cov==6.0.0",
+  "ruff==0.9.4",
+]
+
+[project.scripts]
+tennis-analyze = "tennis_analyzer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "tennis_analyzer"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["BallTrack", "analysis.py", "bounce_detector.py", "court_detection_net.py", "court_reference.py", "homography.py", "main.py", "player.py", "postprocess.py", "tracknet.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+ignore = ["E501", "B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires local ML models"]

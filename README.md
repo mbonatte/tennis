@@ -1,68 +1,172 @@
 # Tennis Analyzer
 
-This project analyzes a tennis video with three computer-vision stages:
+Tennis Analyzer is a single-server FastAPI application that accepts untrusted tennis videos, queues long-running computer-vision analysis in RQ, persists status in PostgreSQL, and publishes a browser-playable annotated MP4 plus structured JSON. The same typed pipeline powers the worker and local CLI.
 
-1. Ball tracking with `tracknet_model.pt`.
-2. Court keypoint and homography detection with `tennis_court.pt`.
-3. Optional player box and pose tracking with YOLO models.
+> Screenshot placeholder: upload and completed-job screenshots should be added after branding and deployment hostname are finalized.
 
-`main.py` is the best place to restart. It now has an `AnalyzerConfig` section at the top where you can turn stages and drawings on or off.
+## Current capabilities and limitations
 
-## Current Default Run
+The application streams uploads, validates them with FFprobe, enforces size/duration/resolution/codec limits, supports selectable ball/court/player/pose/bounce/scene/statistics stages, reports progress, allows cooperative cancellation, survives web restarts, range-streams output, preserves audio where practical, exposes safe failures, and deletes database/file state together.
 
-The default run reads `input.mp4`, tracks the ball, tracks the court and players for stats, predicts bounces, draws the red ball trail, draws bounce markers/frame numbers/stats, writes `output.mp4`, and writes `analysis_stats.json`.
+Event detection, in/out calls, speeds, distances, point splitting, and player roles are experimental monocular-video estimates. Model provenance is unknown and weights are not distributed. Detection uses bounded chunks; TrackNet loses a small temporal context at chunk boundaries, and ball/court models currently reload per chunk. Cancellation cannot interrupt a model call already in progress. Automatic retention and stale-job reconciliation are documented but not scheduled. There is no authentication: UUID detail links are unguessable, but the recent-jobs page lists this deployment's jobs. Use Nginx Proxy Manager access control for any non-private deployment.
 
-```powershell
-.\.venv\Scripts\python.exe main.py
+## Architecture and layout
+
+FastAPI/Jinja2 and a small local stylesheet form the web tier. PostgreSQL stores job metadata, Redis/RQ runs one ML job at a time, OpenCV performs bounded frame inference/rendering, and FFmpeg probes and normalizes H.264/AAC MP4 output. See [architecture](docs/ARCHITECTURE.md), [audit](docs/REPOSITORY_AUDIT.md), [options](docs/ANALYSIS_OPTIONS.md), and [result schema](docs/RESULT_SCHEMA.md).
+
+```text
+app/                    web routes, settings, DB model, services, templates, worker
+alembic/                database migrations
+tennis_analyzer/        typed pipeline, video safety, result/options schema, CLI
+tests/                  generated-video, API, storage, state, pipeline, worker tests
+docs/                   audit, architecture, deployment, options, schema
+scripts/                model installation/checksum helper
+models/                 model manifest only; weights ignored
+deploy/                 self-contained pull-only VPS deployment bundle
+.github/workflows/      tests, image build, Trivy scan, GHCR publishing
+data/jobs/<uuid>/       runtime uploads and outputs; ignored
+BallTrack/              retained third-party-derived git submodule
+*.py                    legacy CV algorithms used through adapters
 ```
 
-Useful command-line options:
+## Models
 
-```powershell
-.\.venv\Scripts\python.exe main.py --draw-court
-.\.venv\Scripts\python.exe main.py --draw-court --draw-players
-.\.venv\Scripts\python.exe main.py --input input.mp4 --output output_debug.mp4
-.\.venv\Scripts\python.exe main.py --input input.mp4 --plot-ball-history
-.\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --split-points-dir points
-.\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --analyze-points-dir point_analysis --draw-court
-.\.venv\Scripts\python.exe main.py --input long_compilation.mp4 --analyze-points-dir point_analysis --keep-debug-scenes
-.\.venv\Scripts\python.exe main.py --no-players
+Initialize the submodule and install legally obtained local weights:
+
+```bash
+git submodule update --init --recursive
+python scripts/download_models.py --source weights --destination models
 ```
 
-## Important Files
+The exact filenames, observed local checksums/sizes, feature mapping, and unresolved licensing are in [models/README.md](models/README.md). There are deliberately no invented download URLs. Model-free scene-cut detection and frame numbering can be tested without weights. At application startup/import models are not loaded; a selected worker stage fails clearly if its required file is missing.
 
-- `main.py`: pipeline entry point and runtime switches.
-- `ball.py`: loads the TrackNet model, predicts ball positions, removes outliers, interpolates gaps, and draws the ball trail.
-- `bounce_detector.py`: uses the tracked ball x/y positions to predict likely bounce frames.
-- `court.py`: wraps court detection and court drawing helpers.
-- `court_detection_net.py`: neural-network inference for court keypoints and homography matrices.
-- `homography.py`: chooses the best court homography from detected keypoints.
-- `postprocess.py`: refines detected court keypoints using local line intersections.
-- `player.py`: player bounding-box tracking, pose tracking, and hybrid player annotation.
-- `tracking_postprocess.py`: stabilizes top/bottom player roles when detections briefly swap, duplicate, or drift off court.
-- `analysis.py`: scene cuts, reference-style shot events, bounce in/out calls, projected speeds, player stats, JSON export, and stats overlay.
-- `analysis_stats.json`: latest generated match statistics.
-- `.cache/`: cached model predictions for faster repeated runs.
-- `REFERENCE_COMPARISON.md`: notes about what the reference projects include and what is still missing here.
+## Local development
 
-## Where To Continue
+Requires Python 3.11, FFmpeg/FFprobe, PostgreSQL, Redis, and roughly 8 GB RAM for CPU model use.
 
-Start by editing `AnalyzerConfig` in `main.py`.
+```bash
+python -m venv .venv
+source .venv/bin/activate                 # Windows: .venv\Scripts\activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[ml,dev]"
+cp .env.example .env                     # Windows: copy .env.example .env
+# For local SQLite development, set DATABASE_URL=sqlite:///./data/tennis.db
+alembic upgrade head
+uvicorn app.main:app --reload
+```
 
-Useful switches:
+In another terminal:
 
-- Set `draw_players=True` to render player boxes and poses.
-- Set `draw_court_keypoints=True` to render detected court keypoints.
-- Set `draw_court_overlay=True` or run `--draw-court` to render the minimap court overlay. The minimap shows the ball in yellow, bounces in orange, top player as blue `T`, and bottom player as green `B`.
-- Set `input_path=PROJECT_ROOT / "your_video.mp4"` to analyze another file.
-- Run with `--plot-ball-history` to save a debug PNG with ball Y pixel history on the left axis, ball X pixel history on the right axis, red shot markers, and green dashed bounce markers. Single-video runs write `<stats-name>_ball_history.png`; point-analysis runs write per-point plots to `point_analysis/ball_history_plots`.
-- Run with `--split-points-dir points` to stream-split a long compilation into one raw MP4 per detected scene/point without running the full analyzer. Files are named with the point number and source frame range.
-- Run with `--analyze-points-dir point_analysis` to split a compilation, quickly discard very short scenes, analyze the remaining candidates, and keep only scenes that look like played points. Played point videos are written to `point_analysis/point_videos`, and their JSON files are written to `point_analysis/point_stats`.
-- Raw scene clips and rejected clips are temporary by default. Add `--keep-debug-scenes` when you want to inspect `raw_scenes` and `rejected_scenes`.
-- Tune the cheap pre-analysis filter with `--min-analyze-frames`; clips shorter than this are rejected before the expensive ball/court/player analysis runs.
+```bash
+rq worker --url redis://localhost:6379/0 analysis
+```
 
-Shot frames use the reference repo's sustained vertical trajectory-change heuristic adapted to TrackNet center points. Speed and player statistics are still heuristic estimates from monocular video, so treat them as debug analytics until they are validated against labeled match events.
+The site is at `http://localhost:8000`. The API creates a job with multipart fields:
 
-Bounce calls in `analysis_stats.json` use different rules for serve and rally play: the first bounce after the first shot is checked against the opposite service boxes, while later game bounces are checked against the full singles court.
+```bash
+curl -i -F "video=@sample.mp4;type=video/mp4" \
+  -F "scene_cut_detection=true" -F "frame_number=true" \
+  http://localhost:8000/api/jobs
+curl http://localhost:8000/api/jobs/JOB_UUID
+```
 
-Short missing ball tracks can happen when the ball is hidden behind a player. The analyzer now rejects pre-shot toss detections and recovers likely hidden bounces by looking for a short occlusion where the ball is falling before the gap, reappears low, and the next shot follows soon after.
+The CLI calls the identical pipeline:
+
+```bash
+tennis-analyze sample.mp4 data/cli-job --models models
+tennis-analyze sample.mp4 data/cli-full --models models --full --device cpu
+```
+
+## CI/CD and container images
+
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs on pull requests to `main`, pushes to `main`, `v*.*.*` tags, and manual dispatch. It runs formatting, linting, and tests; builds the production Dockerfile with BuildKit caching; scans the image with Trivy and uploads SARIF when GitHub code scanning supports it; and publishes non-PR builds to `ghcr.io/mbonatte/tennis`.
+
+Pull requests build and scan without publishing. A successful `main` push publishes `latest` and `sha-<short-sha>`. A tag such as `v1.2.3` publishes `1.2.3`, `1.2`, `1`, and its SHA tag. The workflow uses `GITHUB_TOKEN`, needs no custom repository secret for publishing, and grants only `contents:read`, `packages:write`, and `security-events:write` to the image job. GHCR package visibility is managed separately in GitHub. Private-package VPS pulls require a PAT with `read:packages`; never store it in `.env`.
+
+Run CI checks locally:
+
+```bash
+python -m pip install -e ".[dev]"
+python -m ruff format --check app tennis_analyzer tests ball.py
+python -m ruff check app tennis_analyzer tests ball.py
+python -m pytest -q
+```
+
+Build the production image locally for testing:
+
+```bash
+git submodule update --init --recursive
+docker build -t tennis:local .
+```
+
+## Docker development
+
+The default image is CPU-only and containers run as UID 10001. Compose defines `web`, `worker`, `postgres`, `redis`, and a one-shot `migrate`; named volumes hold DB, Redis, and job data, while the ignored local `./models` directory is mounted read-only. The worker count defaults to one.
+
+```bash
+cp .env.example .env
+# Edit every placeholder; DATABASE_URL password must match POSTGRES_PASSWORD.
+docker network create proxy              # once; reuse your NPM external network
+docker compose build
+docker compose up -d
+docker compose ps
+docker compose logs -f web worker
+```
+
+Apply later migrations exactly once:
+
+```bash
+docker compose run --rm migrate alembic upgrade head
+```
+
+This root Compose file is for local development and intentionally uses `build:`. Nginx Proxy Manager can proxy to `tennis-web:8000` on `proxy`.
+
+## VPS deployment from the published image
+
+Copy only the [`deploy/`](deploy/) directory to the VPS. Its Compose file has no `build:` and uses the same configurable `APP_IMAGE` for web, worker, and migrations:
+
+```bash
+cd deploy
+cp .env.example .env
+# Edit .env and place legally obtained weights in ./models
+docker network create proxy 2>/dev/null || true
+docker compose pull
+docker compose run --rm migrate
+docker compose up -d
+docker compose ps
+docker compose logs -f web
+docker compose logs -f worker
+```
+
+Update with the same `pull`, explicit migration, and `up -d` sequence. Stop without deleting data using `docker compose down`. Do not casually use `docker compose down -v`, which deletes named database, Redis, and job-data volumes. Pin `APP_IMAGE` to `sha-<short-sha>` or a release tag for deterministic rollback; `latest` is convenient but mutable. Full GHCR login, persistence, backup, upgrade, rollback, Nginx Proxy Manager, and troubleshooting guidance is in [deploy/README.md](deploy/README.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+For optional NVIDIA deployment, install NVIDIA Container Toolkit, change the image/build to a CUDA-compatible PyTorch base, reserve the GPU in an override, and set `DEVICE=cuda`. CUDA is intentionally not required or enabled in the default build.
+
+## Configuration
+
+All settings are environment validated. Important variables are `ENVIRONMENT`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `DATA_ROOT`, `MODEL_ROOT`, `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, `MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `ALLOWED_VIDEO_EXTENSIONS`, `ALLOWED_VIDEO_CODECS`, `JOB_TIMEOUT_SECONDS`, `WORKER_CONCURRENCY`, `RETENTION_DAYS`, `LOG_LEVEL`, `DEVICE`, `ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, and `ANALYSIS_CHUNK_FRAMES`. Safe development defaults use local SQLite/data paths; production must replace secrets and service URLs. Never commit `.env`.
+
+## Tests and quality
+
+Tests generate a tiny H.264/AAC video with FFmpeg and never download ML weights:
+
+```bash
+python -m pytest -q
+python -m ruff check app tennis_analyzer tests ball.py
+python -m ruff format --check app tennis_analyzer tests ball.py
+```
+
+An opt-in real-model smoke path is the CLI `--full` command above; keep its input very short. GitHub Actions performs the clean-checkout Linux image build and security scan.
+
+## Operations and troubleshooting
+
+- `GET /healthz` checks the web process; `GET /readyz` checks PostgreSQL and Redis.
+- If an upload is rejected, inspect its real codec/duration with `ffprobe input.mp4`; extensions and browser MIME are not trusted.
+- If a job reports a missing model, compare `MODEL_ROOT` and the model-volume contents with `models/README.md`.
+- If output is absent, inspect `docker compose logs worker` and RQ's failed registry. Public responses never include tracebacks.
+- A killed worker may leave a DB row `running`; after `JOB_TIMEOUT_SECONDS`, confirm its RQ job is absent and mark it failed before retrying.
+- Back up PostgreSQL and `job-data`; Redis AOF is persisted but is not a substitute for database/job-data backups.
+- `RETENTION_DAYS` records policy only today. Delete through the UI or `DELETE /api/jobs/<uuid>` until scheduled cleanup is added.
+- Before updating: stop/drain the worker, back up, select a tested immutable GHCR tag, pull it, run the one-shot migration, and recreate services.
+
+The unauthenticated MVP is appropriate only behind a trusted boundary/access list. It lacks users, authorization, quotas, malware scanning, CSRF tokens, rate limiting, and per-tenant storage isolation. Authentication and ownership are the first production hardening priority.
