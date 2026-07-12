@@ -79,9 +79,9 @@ tennis-analyze sample.mp4 data/cli-full --models models --full --device cpu
 
 ## CI/CD and container images
 
-[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs on pull requests to `main`, pushes to `main`, `v*.*.*` tags, and manual dispatch. It runs formatting, linting, and tests; builds the production Dockerfile with BuildKit caching; scans the image with Trivy and uploads SARIF when GitHub code scanning supports it; and publishes non-PR builds to `ghcr.io/mbonatte/tennis`.
+[`.github/workflows/ci-cd.yml`](.github/workflows/ci-cd.yml) runs on pull requests to `main`, pushes to `main`, `v*.*.*` tags, and manual dispatch. It runs formatting, linting, and tests; builds the production Dockerfile with BuildKit caching; scans the image with Trivy and uploads non-blocking SARIF findings when GitHub code scanning supports it; and publishes non-PR builds to `ghcr.io/mbonatte/tennis`. Review and prioritize code-scanning alerts separately; the presence of an upstream base-image advisory does not prevent publishing an otherwise verified image.
 
-Pull requests build and scan without publishing. A successful `main` push publishes `latest` and `sha-<short-sha>`. A tag such as `v1.2.3` publishes `1.2.3`, `1.2`, `1`, and its SHA tag. The workflow uses `GITHUB_TOKEN`, needs no custom repository secret for publishing, and grants only `contents:read`, `packages:write`, and `security-events:write` to the image job. GHCR package visibility is managed separately in GitHub. Private-package VPS pulls require a PAT with `read:packages`; never store it in `.env`.
+Pull requests build and scan without publishing. A successful `main` push publishes `latest` and `sha-<short-sha>`. A tag such as `v1.2.3` publishes `1.2.3`, `1.2`, `1`, and its SHA tag. The workflow uses `GITHUB_TOKEN`, needs no custom repository secret for publishing, and grants `security-events:write` only to the scan job and `packages:write` only to the publish job; all jobs otherwise use `contents:read`. GHCR package visibility is managed separately in GitHub. Private-package VPS pulls require a PAT with `read:packages`; never store it in `.env`.
 
 Run CI checks locally:
 
