@@ -17,7 +17,7 @@ def test_settings_build_database_url_from_single_password():
     from sqlalchemy.engine import make_url
 
     url = make_url(settings.database_url)
-    assert url.host == "postgres"
+    assert url.host == "tennis-postgres"
     assert url.username == "tennis"
     assert url.password == "p@ss: /word"
 

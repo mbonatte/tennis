@@ -12,6 +12,6 @@ docker compose run --rm migrate
 docker compose up -d
 ```
 
-Web, worker, and the explicit migration job use the same `APP_IMAGE`. PostgreSQL, Redis AOF, and job data use named volumes; models use a read-only `deploy/models` bind mount. PostgreSQL and Redis are isolated on an internal network. Only the web service joins the existing Nginx Proxy Manager `proxy` network.
+Web, worker, and the explicit migration job use the same `APP_IMAGE`. PostgreSQL, Redis AOF, and job data use named volumes; models use a read-only `deploy/models` bind mount. PostgreSQL and Redis are isolated on an internal network, and PostgreSQL uses the unique `tennis-postgres` alias to avoid DNS collisions with other proxy-network stacks. Only the web service joins the existing Nginx Proxy Manager `proxy` network.
 
 Use an immutable `sha-*` or release tag for production and rollback. Database migration is never performed by web or worker startup. See [deploy/README.md](../deploy/README.md) for exact first-deploy, registry authentication, model setup, backup, update, rollback, shutdown, and troubleshooting procedures.

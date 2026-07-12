@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     secret_key: str = "development-only-change-me"
     database_url: str = ""
-    postgres_host: str = "postgres"
+    postgres_host: str = "tennis-postgres"
     postgres_port: int = 5432
     postgres_db: str = "tennis"
     postgres_user: str = "tennis"
