@@ -18,8 +18,8 @@ cd deploy
 cp .env.example .env
 mkdir -p models
 chmod 700 models
-# Edit .env: change every placeholder, make DATABASE_URL use the same
-# PostgreSQL password, and set the real hostname/public URL.
+# Edit .env: change every placeholder and set the real hostname/public URL.
+# DATABASE_URL is built safely from the single POSTGRES_PASSWORD setting.
 
 docker network create proxy 2>/dev/null || true
 docker compose pull
@@ -98,9 +98,25 @@ Rollback application code by setting `APP_IMAGE` to the previous `sha-*` or rele
 
 ## Troubleshooting
 
-- **Web unhealthy:** inspect `docker compose logs web`, then `postgres` and `redis`; verify `.env` JSON list syntax, `ALLOWED_HOSTS`, matching database passwords, and `/readyz`.
-- **Worker unhealthy:** inspect `docker compose logs worker`; confirm `REDIS_URL`, `DATABASE_URL`, memory availability, and model permissions. Keep `WORKER_CONCURRENCY=1` unless RAM/GPU capacity has been measured.
+- **Web unhealthy:** inspect `docker compose logs web`, then `postgres` and `redis`; verify `.env` JSON list syntax, `ALLOWED_HOSTS`, PostgreSQL credentials, and `/readyz`.
+- **Worker unhealthy:** inspect `docker compose logs worker`; confirm `REDIS_URL`, PostgreSQL settings, memory availability, and model permissions. Keep `WORKER_CONCURRENCY=1` unless RAM/GPU capacity has been measured.
 - **Migration failure:** run `docker compose run --rm migrate` without `-d`, verify PostgreSQL health and credentials, and inspect `docker compose logs postgres`. Do not start a newer app image against a migration that failed.
 - **Permission errors:** model files must be readable by UID 10001. Named job data is initialized by the same non-root image user.
 - **Pull failure:** confirm GHCR login/package visibility and that `APP_IMAGE` names an existing tag.
 - **Disk pressure:** inspect `docker system df` and named-volume sizes. Delete jobs through the application; do not delete arbitrary files from a live job directory.
+
+### PostgreSQL password mismatch after first initialization
+
+The official PostgreSQL image applies `POSTGRES_PASSWORD` only when creating an empty database volume. Editing `.env` later does not change the password already stored in PostgreSQL. To preserve existing data, update the role interactively to the current `.env` password:
+
+```bash
+docker compose exec postgres psql -U tennis -d tennis
+\password tennis
+# Enter the current POSTGRES_PASSWORD twice, then:
+\q
+
+docker compose restart web worker
+docker compose ps
+```
+
+Alternatively, restore the original password in `.env`. For a brand-new deployment with no data worth preserving, you may stop the stack and delete only its PostgreSQL volume before starting again. That is destructive; verify the exact volume with `docker volume ls` and never use `docker compose down -v` when job or Redis data must be retained.

@@ -12,6 +12,25 @@ def test_settings_parse_hosts_and_positive_limits(tmp_path):
         Settings(worker_concurrency=0)
 
 
+def test_settings_build_database_url_from_single_password():
+    settings = Settings(_env_file=None, database_url="", postgres_password="p@ss: /word")
+    from sqlalchemy.engine import make_url
+
+    url = make_url(settings.database_url)
+    assert url.host == "postgres"
+    assert url.username == "tennis"
+    assert url.password == "p@ss: /word"
+
+
+def test_settings_reject_mismatched_duplicate_database_password():
+    with pytest.raises(ValidationError, match="must match POSTGRES_PASSWORD"):
+        Settings(
+            _env_file=None,
+            database_url="postgresql+psycopg://tennis:first@postgres:5432/tennis",
+            postgres_password="second",
+        )
+
+
 def test_analysis_dependencies_are_enabled():
     options = AnalysisOptions(statistics=True, pose_tracking=True).validated()
     assert options.ball_tracking and options.court_detection and options.player_tracking

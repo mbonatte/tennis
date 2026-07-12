@@ -105,7 +105,8 @@ The default image is CPU-only and containers run as UID 10001. Compose defines `
 
 ```bash
 cp .env.example .env
-# Edit every placeholder; DATABASE_URL password must match POSTGRES_PASSWORD.
+# Edit every placeholder. The application safely builds DATABASE_URL from
+# the single POSTGRES_PASSWORD value.
 docker network create proxy              # once; reuse your NPM external network
 docker compose build
 docker compose up -d
@@ -144,7 +145,7 @@ For optional NVIDIA deployment, install NVIDIA Container Toolkit, change the ima
 
 ## Configuration
 
-All settings are environment validated. Important variables are `ENVIRONMENT`, `SECRET_KEY`, `DATABASE_URL`, `REDIS_URL`, `DATA_ROOT`, `MODEL_ROOT`, `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, `MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `ALLOWED_VIDEO_EXTENSIONS`, `ALLOWED_VIDEO_CODECS`, `JOB_TIMEOUT_SECONDS`, `WORKER_CONCURRENCY`, `RETENTION_DAYS`, `LOG_LEVEL`, `DEVICE`, `ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, and `ANALYSIS_CHUNK_FRAMES`. Safe development defaults use local SQLite/data paths; production must replace secrets and service URLs. Never commit `.env`.
+All settings are environment validated. Important variables are `ENVIRONMENT`, `SECRET_KEY`, `POSTGRES_PASSWORD`, `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `REDIS_URL`, `DATA_ROOT`, `MODEL_ROOT`, `MAX_UPLOAD_BYTES`, `MAX_VIDEO_DURATION_SECONDS`, `MAX_VIDEO_WIDTH`, `MAX_VIDEO_HEIGHT`, `ALLOWED_VIDEO_EXTENSIONS`, `ALLOWED_VIDEO_CODECS`, `JOB_TIMEOUT_SECONDS`, `WORKER_CONCURRENCY`, `RETENTION_DAYS`, `LOG_LEVEL`, `DEVICE`, `ALLOWED_HOSTS`, `PUBLIC_BASE_URL`, and `ANALYSIS_CHUNK_FRAMES`. Production builds `DATABASE_URL` safely from the single PostgreSQL password; an explicit `DATABASE_URL` remains supported for development/advanced deployments and is rejected when its password conflicts with `POSTGRES_PASSWORD`. Safe development defaults use local SQLite/data paths. Never commit `.env`.
 
 ## Tests and quality
 

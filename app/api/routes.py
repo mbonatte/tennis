@@ -9,7 +9,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from redis import Redis
+from redis.exceptions import RedisError
 from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
@@ -71,11 +74,12 @@ def readiness(db: Session = Depends(get_db), settings: Settings = Depends(get_se
     try:
         db.execute(text("SELECT 1"))
         checks["database"] = True
-        from redis import Redis
-
+    except SQLAlchemyError as exc:
+        logger.warning("Database readiness check failed: %s", str(exc).splitlines()[0])
+    try:
         checks["redis"] = bool(Redis.from_url(settings.redis_url).ping())
-    except Exception:
-        logger.warning("Readiness dependency check failed", exc_info=True)
+    except RedisError as exc:
+        logger.warning("Redis readiness check failed: %s", str(exc).splitlines()[0])
     ready = all(checks.values())
     return JSONResponse(
         {"status": "ready" if ready else "not_ready", "checks": checks}, status_code=200 if ready else 503

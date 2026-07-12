@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 class Settings(BaseSettings):
@@ -12,7 +14,12 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     secret_key: str = "development-only-change-me"
-    database_url: str = "sqlite:///./data/tennis.db"
+    database_url: str = ""
+    postgres_host: str = "postgres"
+    postgres_port: int = 5432
+    postgres_db: str = "tennis"
+    postgres_user: str = "tennis"
+    postgres_password: str = ""
     redis_url: str = "redis://localhost:6379/0"
     data_root: Path = Path("data")
     model_root: Path = Path("models")
@@ -49,6 +56,26 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("must be positive")
         return value
+
+    @model_validator(mode="after")
+    def resolve_database_url(self):
+        """Build one safe PostgreSQL URL or validate an explicit override."""
+        if self.database_url:
+            if self.postgres_password and self.database_url.startswith("postgresql"):
+                configured_password = make_url(self.database_url).password
+                if configured_password != self.postgres_password:
+                    raise ValueError("DATABASE_URL password must match POSTGRES_PASSWORD")
+            return self
+        if self.postgres_password:
+            user = quote(self.postgres_user, safe="")
+            password = quote(self.postgres_password, safe="")
+            database = quote(self.postgres_db, safe="")
+            self.database_url = (
+                f"postgresql+psycopg://{user}:{password}@{self.postgres_host}:{self.postgres_port}/{database}"
+            )
+        else:
+            self.database_url = "sqlite:///./data/tennis.db"
+        return self
 
 
 @lru_cache
