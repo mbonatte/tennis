@@ -9,7 +9,7 @@ This directory is the complete deployment bundle. The VPS does not need the Git 
 - Enough disk for PostgreSQL, Redis AOF, uploads, outputs, and model weights.
 - Access to `ghcr.io/mbonatte/tennis` if the package is private.
 
-PostgreSQL and Redis are only attached to the internal `backend` network and publish no host ports. The web container joins `proxy` and exposes port 8000 only to containers on that network. Configure Nginx Proxy Manager to forward to `tennis-web:8000`, enable TLS and an access list, and set `client_max_body_size 2048m;` in its advanced configuration.
+PostgreSQL and Redis are only attached to the internal `backend` network and publish no host ports. The web container joins `proxy` and exposes port 8123 only to containers on that network, avoiding a collision with an existing port-8000 container. Configure Nginx Proxy Manager to forward to `tennis-web:8123`, enable TLS and an access list, and set `client_max_body_size 2048m;` in its advanced configuration.
 
 ## First deployment
 

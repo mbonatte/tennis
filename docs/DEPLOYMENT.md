@@ -2,7 +2,7 @@
 
 Production deployment is pull-only. GitHub Actions builds `Dockerfile`, scans the result, and publishes it to `ghcr.io/mbonatte/tennis`. The self-contained [`deploy/`](../deploy/) directory is the only application bundle needed on the VPS; its Compose file contains no `build:` directives.
 
-The production sequence is:
+The production web process listens on container port `8123` and is reached through Nginx Proxy Manager at `tennis-web:8123`; it does not publish that port on the VPS host. The production sequence is:
 
 ```bash
 cd deploy
