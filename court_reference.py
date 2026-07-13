@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
 
 class CourtReference:
@@ -74,10 +73,6 @@ class CourtReference:
         cv2.line(court, *self.right_inner_line, 1, self.line_width)
         cv2.line(court, *self.middle_line, 1, self.line_width)
         court = cv2.dilate(court, np.ones((5, 5), dtype=np.uint8))
-        plt.imsave('court_configurations/court_reference_5.png', court, cmap='gray')
-        # court = cv2.dilate(court, np.ones((7, 7), dtype=np.uint8))
-        # plt.imsave('court_configurations/court_reference_7.png', court, cmap='gray')
-        # self.court = court
         return court
 
     def get_important_lines(self):
