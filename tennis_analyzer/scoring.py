@@ -1,4 +1,5 @@
 """Deterministic, override-friendly tennis scoring for singles matches."""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -22,7 +23,12 @@ class PointRecord:
 
 def score_match(points: list[PointRecord], initial: dict | None = None) -> dict:
     """Score known point winners; unknown points leave state unchanged and explicit."""
-    state = {"points": {"top_player": 0, "bottom_player": 0}, "games": {"top_player": 0, "bottom_player": 0}, "sets": {"top_player": 0, "bottom_player": 0}, "completed_sets": []}
+    state = {
+        "points": {"top_player": 0, "bottom_player": 0},
+        "games": {"top_player": 0, "bottom_player": 0},
+        "sets": {"top_player": 0, "bottom_player": 0},
+        "completed_sets": [],
+    }
     if initial:
         for key in ("points", "games", "sets"):
             state[key].update(initial.get(key, {}))
@@ -40,8 +46,25 @@ def score_match(points: list[PointRecord], initial: dict | None = None) -> dict:
                     state["completed_sets"].append(dict(state["games"]))
                     state["sets"][set_winner] += 1
                     state["games"] = {"top_player": 0, "bottom_player": 0}
-        rows.append({"point_index": index, **asdict(point), "score_before": before, "score_after": _display_points(state["points"]), "games": dict(state["games"]), "sets": dict(state["sets"])})
-    return {"points": rows, **state, "limitations": ["Singles scoring. Automatic winner inference is experimental; tiebreak inference requires user review."]}
+        rows.append(
+            {
+                "point_index": index,
+                **asdict(point),
+                "score_before": before,
+                "score_after": _display_points(state["points"]),
+                "games": dict(state["games"]),
+                "sets": dict(state["sets"]),
+            }
+        )
+    return {
+        "points": rows,
+        "games": state["games"],
+        "sets": state["sets"],
+        "completed_sets": state["completed_sets"],
+        "limitations": [
+            "Singles scoring. Automatic winner inference is experimental; tiebreak inference requires user review."
+        ],
+    }
 
 
 def _game_winner(points: dict[str, int]) -> str | None:
@@ -64,6 +87,10 @@ def _display_points(points: dict[str, int]) -> dict[str, str]:
         if top == bottom:
             return {"top_player": "40", "bottom_player": "40", "status": "deuce"}
         leader = "top_player" if top > bottom else "bottom_player"
-        return {"top_player": "AD" if leader == "top_player" else "40", "bottom_player": "AD" if leader == "bottom_player" else "40", "status": "advantage"}
+        return {
+            "top_player": "AD" if leader == "top_player" else "40",
+            "bottom_player": "AD" if leader == "bottom_player" else "40",
+            "status": "advantage",
+        }
     values = ["0", "15", "30", "40"]
     return {"top_player": values[top], "bottom_player": values[bottom], "status": "normal"}

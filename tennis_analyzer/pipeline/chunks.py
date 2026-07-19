@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,7 +29,9 @@ class FrameChunk:
         return self.start_frame + len(self.frames)
 
 
-def iter_frame_chunks(path: Path, size: int) -> Iterator[FrameChunk]:
+def iter_frame_chunks(
+    path: Path, size: int, *, on_decode: Callable[[int, float], None] | None = None
+) -> Iterator[FrameChunk]:
     """Decode a video incrementally and always release its capture handle."""
     if size <= 0:
         raise ValueError("chunk size must be positive")
@@ -42,6 +45,7 @@ def iter_frame_chunks(path: Path, size: int) -> Iterator[FrameChunk]:
     read_any = False
     try:
         while True:
+            started = time.perf_counter()
             frames: list[np.ndarray] = []
             for _ in range(size):
                 ok, frame = capture.read()
@@ -51,6 +55,8 @@ def iter_frame_chunks(path: Path, size: int) -> Iterator[FrameChunk]:
             if not frames:
                 break
             read_any = True
+            if on_decode is not None:
+                on_decode(len(frames), time.perf_counter() - started)
             yield FrameChunk(start, frames)
             start += len(frames)
     finally:

@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
@@ -115,7 +116,7 @@ def _sampled_court_detection(source, frame_total, scene_cuts, court_stage, chunk
                 sample_indices.append(index)
                 sample_frames.append(frame)
     detected_h, detected_k = court_stage.process_chunk(sample_frames)
-    valid = [(h, k) for h, k in zip(detected_h, detected_k) if h is not None and k is not None]
+    valid = [(h, k) for h, k in zip(detected_h, detected_k, strict=False) if h is not None and k is not None]
     if not valid:
         raise VideoProcessingError("Court detection failed on every representative frame")
     arrays = [np.asarray(keypoint, dtype=np.float32).reshape(-1, 2) for _, keypoint in valid]
@@ -126,9 +127,13 @@ def _sampled_court_detection(source, frame_total, scene_cuts, court_stage, chunk
     # 2% of image diagonal: larger displacement means camera/court geometry changed.
     if max(distances) <= 0.02:
         homography, points = valid[best]
-        progress.update("court_detection", frame_total, frame_total, f"Reused stable court calibration from {len(valid)} samples")
+        progress.update(
+            "court_detection", frame_total, frame_total, f"Reused stable court calibration from {len(valid)} samples"
+        )
         return [homography] * frame_total, [points] * frame_total
-    logger.warning("Court samples diverged; using per-frame fallback", extra={"court_sample_divergence": max(distances)})
+    logger.warning(
+        "Court samples diverged; using per-frame fallback", extra={"court_sample_divergence": max(distances)}
+    )
     homographies, keypoints = [], []
     for chunk in iter_frame_chunks(source, chunk_size):
         _cancelled(cancellation_check)
@@ -155,7 +160,16 @@ def derive_point_scenes(ball_track, bounces: set[int], shots: list[dict], fps: f
         start = max(0, group[0] - int(fps * 3.3))
         if not scenes and start < int(fps * 4):
             start = 0
-        last_event = max([group[-1], *[event["frame"] for event in shots if group[-1] <= event.get("frame", -1) <= group[-1] + int(fps * 3.5)]])
+        last_event = max(
+            [
+                group[-1],
+                *[
+                    event["frame"]
+                    for event in shots
+                    if group[-1] <= event.get("frame", -1) <= group[-1] + int(fps * 3.5)
+                ],
+            ]
+        )
         end = min(len(ball_track) - 1, last_event + int(fps * 3.3))
         scenes.append({"id": f"point-{len(scenes) + 1}", "start_frame": start, "end_frame": end, "selected": True})
     return scenes
@@ -257,7 +271,9 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 total += 1
             if progress_callback:
                 progress_callback(
-                    "rendering", min(99, int(total * 100 / max(1, end_frame - start_frame + 1))), "Rendering saved analysis"
+                    "rendering",
+                    min(99, int(total * 100 / max(1, end_frame - start_frame + 1))),
+                    "Rendering saved analysis",
                 )
         if total != end_frame - start_frame + 1:
             raise VideoProcessingError("Selected scene frame count does not match the analysis artifact")
@@ -493,8 +509,14 @@ def analyze_video(
     if analysis.ball_tracking:
         raw_ball_track = []
         ball_stage = factories.ball(models.ball, selected.device, selected.ball_batch_size)
+        ball_decode_seconds = 0.0
+
+        def record_ball_decode(_frames: int, elapsed: float) -> None:
+            nonlocal ball_decode_seconds
+            ball_decode_seconds += elapsed
+
         try:
-            for chunk in iter_frame_chunks(source, selected.chunk_size):
+            for chunk in iter_frame_chunks(source, selected.chunk_size, on_decode=record_ball_decode):
                 _cancelled(cancellation_check)
                 raw_ball_track.extend(ball_stage.process_chunk(chunk.frames))
                 progress.update(
@@ -503,7 +525,25 @@ def analyze_video(
         finally:
             _release_stage(ball_stage)
         _require_aligned("Ball tracking", raw_ball_track, frame_total)
+        timing_fields = getattr(ball_stage, "timing_fields", lambda: {})()
+        logger.info(
+            "Completed ball-tracking stage",
+            extra={
+                **timing_fields,
+                "ball_decode_seconds": round(ball_decode_seconds, 3),
+                "ball_chunk_frames": selected.chunk_size,
+                "ball_batch_size": selected.ball_batch_size,
+            },
+        )
+        postprocess_started = time.perf_counter()
         ball_track = postprocess_ball_track(raw_ball_track)
+        logger.info(
+            "Completed ball continuity filtering",
+            extra={
+                "ball_continuity_seconds": round(time.perf_counter() - postprocess_started, 3),
+                "ball_frames": frame_total,
+            },
+        )
         del raw_ball_track
     else:
         ball_track = [(None, None)] * frame_total
@@ -580,7 +620,15 @@ def analyze_video(
             PointRecord(
                 start_frame=scene["start_frame"],
                 end_frame=scene["end_frame"],
-                server=next((event.get("player_role") for event in shots if event["frame"] >= scene["start_frame"] and event.get("player_role") in {"top_player", "bottom_player"}), None),
+                server=next(
+                    (
+                        event.get("player_role")
+                        for event in shots
+                        if event["frame"] >= scene["start_frame"]
+                        and event.get("player_role") in {"top_player", "bottom_player"}
+                    ),
+                    None,
+                ),
                 winner=None,
                 confidence=None,
                 reason="winner_unknown",
