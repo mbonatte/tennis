@@ -69,10 +69,14 @@
   document.getElementById("load-calibration-frame").addEventListener("click", () => load().catch((error) => { status.textContent = error.message; }));
   document.getElementById("save-court-calibration").addEventListener("click", async () => {
     if (points.some((point) => !point)) { status.textContent = "Click all four court corners before saving."; return; }
-    const response = await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({frame_index: Number(frameInput.value), image_points: points})});
-    const data = await response.json();
-    status.textContent = response.ok ? (data.court_events_recomputed ? `Court correction saved. Recomputed ${data.bounce_count || 0} court-dependent bounce events; new renders will use them.` : "Court correction saved. This older analysis has no saved event data to recompute.") : (data.detail || "Could not save court correction.");
-    if (response.ok) window.setTimeout(() => location.reload(), 800);
+    try {
+      const response = await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({frame_index: Number(frameInput.value), image_points: points})});
+      const data = await response.json().catch(() => ({}));
+      status.textContent = response.ok ? (data.court_events_recomputed ? `Court correction saved. Recomputed ${data.bounce_count || 0} court-dependent bounce events; new renders will use them.` : "Court correction saved. This older analysis has no saved event data to recompute.") : (data.detail || "Could not save court correction. Please try again.");
+      if (response.ok) window.setTimeout(() => location.reload(), 800);
+    } catch (error) {
+      status.textContent = `Could not save court correction: ${error.message || "network error"}`;
+    }
   });
   const clear = document.getElementById("clear-court-calibration");
   if (clear) clear.addEventListener("click", async () => { await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "DELETE"}); location.reload(); });

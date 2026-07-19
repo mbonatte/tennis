@@ -96,7 +96,7 @@ def project_player_tracks(player_tracks, homography_matrices) -> list[dict[str, 
         frame_players = {}
         if frame_num < len(homography_matrices) and homography_matrices[frame_num] is not None:
             for player in players:
-                frame_players[player.role] = project_point(
+                frame_players[_player_role(player)] = project_point(
                     _player_foot_point(player),
                     homography_matrices[frame_num],
                 )
@@ -1334,8 +1334,13 @@ def _frame_histogram(frame):
 
 
 def _player_foot_point(player):
-    x1, _, x2, y2 = player.bbox
+    bbox = player["bbox"] if isinstance(player, dict) else player.bbox
+    x1, _, x2, y2 = bbox
     return ((x1 + x2) / 2, y2)
+
+
+def _player_role(player):
+    return player.get("role", "player") if isinstance(player, dict) else player.role
 
 
 def _court_meter_scales() -> tuple[float, float]:

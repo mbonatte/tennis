@@ -321,6 +321,9 @@ def save_court_calibration(
     except (OSError, ValueError) as exc:
         logger.exception("Court-event recomputation failed")
         raise HTTPException(500, "Could not recompute court-dependent events") from exc
+    except Exception as exc:
+        logger.exception("Unexpected court-event recomputation failure")
+        raise HTTPException(500, "Could not recompute court-dependent events") from exc
     job.court_calibration = calibration
     db.commit()
     return {
