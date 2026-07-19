@@ -10,19 +10,27 @@ import numpy as np
 import torch
 
 from BallTrack.model import BallTrackerNet
+from tennis_analyzer.errors import VideoProcessingError
+from tennis_analyzer.pipeline.temporal import TemporalContextBuffer
 
 _TORCH_THREADS_CONFIGURED = False
 MODEL_WIDTH = 640
 MODEL_HEIGHT = 360
 REFERENCE_WIDTH = 1280.0
 REFERENCE_HEIGHT = 720.0
+TEMPORAL_WINDOW_FRAMES = 3
+TEMPORAL_CONTEXT_FRAMES = TEMPORAL_WINDOW_FRAMES - 1
 
 
 def load_model(model_path: Path, device: torch.device, use_compile: bool = False):
     """Load the upstream TrackNet architecture with application-owned weights."""
     model = BallTrackerNet()
-    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint)
+    try:
+        checkpoint = torch.load(model_path, map_location=device, weights_only=True)
+        state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+        model.load_state_dict(state_dict)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        raise VideoProcessingError("The ball-tracking checkpoint is incompatible or unreadable") from exc
     model.to(device)
     model.eval()
     return torch.compile(model) if use_compile else model
@@ -93,6 +101,12 @@ def infer_model_batched(frames, model, device, batch_size: int = 32, use_amp: bo
     return track, distances
 
 
+def ball_distances(track):
+    if not track:
+        return []
+    return [-1.0, *[_euclidean(current, previous) for previous, current in zip(track, track[1:])]]
+
+
 def remove_outliers(track, distances, max_distance: float = 100):
     outliers = list(np.where(np.asarray(distances) > max_distance)[0])
     for index in outliers.copy():
@@ -137,39 +151,79 @@ def interpolation(coordinates):
     return list(zip(x_values, y_values, strict=True))
 
 
-def track_ball(frames, extrapolation=True, model_path=None, device_name=None):
-    global _TORCH_THREADS_CONFIGURED
-    project_root = Path(__file__).resolve().parent
-
-    model_path = Path(model_path) if model_path else project_root / "weights" / "tracknet_model.pt"
-
-    device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
-    if not _TORCH_THREADS_CONFIGURED:
-        cpu_threads = max(1, (os.cpu_count() or 4) - 1)
-        torch.set_num_threads(cpu_threads)
-        torch.set_num_interop_threads(1)
-        _TORCH_THREADS_CONFIGURED = True
-
-    use_compile = False
-    model = load_model(model_path, device, use_compile=use_compile)
-
-    # ball_track, dists = infer_model(frames, model, device)
-    ball_track, dists = infer_model_batched(
-        frames,
-        model,
-        device=device,
-        batch_size=8,
-        use_amp=False,
-    )
-    ball_track = remove_outliers(ball_track, dists)
-
+def postprocess_ball_track(raw_track, *, extrapolation=True):
+    """Apply continuity-based filtering once, after all raw chunks are joined."""
+    ball_track = list(raw_track)
+    ball_track = remove_outliers(ball_track, ball_distances(ball_track))
     if extrapolation:
-        subtracks = split_track(ball_track)
-        for start, end in subtracks:
-            ball_subtrack = ball_track[start:end]
-            ball_track[start:end] = interpolation(ball_subtrack)
-
+        for start, end in split_track(ball_track):
+            ball_track[start:end] = interpolation(ball_track[start:end])
     return ball_track
+
+
+class BallTracker:
+    """Own one TrackNet model and its cross-chunk temporal source-frame state."""
+
+    temporal_context_frames = TEMPORAL_CONTEXT_FRAMES
+
+    def __init__(self, model, device: torch.device, *, batch_size: int = 8, use_amp: bool = False):
+        if batch_size <= 0:
+            raise ValueError("ball batch size must be positive")
+        self.model = model
+        self.device = device
+        self.batch_size = batch_size
+        self.use_amp = use_amp
+        self._context = TemporalContextBuffer(self.temporal_context_frames)
+
+    @classmethod
+    def from_checkpoint(cls, model_path, device_name=None, *, batch_size=8, use_amp=False):
+        global _TORCH_THREADS_CONFIGURED
+        device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
+        if not _TORCH_THREADS_CONFIGURED:
+            cpu_threads = max(1, (os.cpu_count() or 4) - 1)
+            torch.set_num_threads(cpu_threads)
+            torch.set_num_interop_threads(1)
+            _TORCH_THREADS_CONFIGURED = True
+        model = load_model(Path(model_path), device, use_compile=False)
+        return cls(model, device, batch_size=batch_size, use_amp=use_amp)
+
+    def process_chunk(self, frames):
+        if not frames:
+            return []
+        combined, overlap = self._context.prepend(frames)
+        effective_batch = min(self.batch_size, max(1, len(combined) - self.temporal_context_frames))
+        track, _ = infer_model_batched(
+            combined,
+            self.model,
+            self.device,
+            batch_size=effective_batch,
+            use_amp=self.use_amp,
+        )
+        result = track[overlap:]
+        if len(result) != len(frames):
+            raise VideoProcessingError("Ball inference returned an unexpected number of frame results")
+        return result
+
+    def close(self):
+        self._context.clear()
+        self.model = None
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
+
+
+def track_ball(frames, extrapolation=True, model_path=None, device_name=None, batch_size=8):
+    """Compatibility helper for one in-memory frame sequence.
+
+    The production pipeline owns a :class:`BallTracker` directly so its model
+    and temporal state survive every source chunk.
+    """
+    project_root = Path(__file__).resolve().parent
+    model_path = Path(model_path) if model_path else project_root / "weights" / "tracknet_model.pt"
+    tracker = BallTracker.from_checkpoint(model_path, device_name, batch_size=batch_size)
+    try:
+        return postprocess_ball_track(tracker.process_chunk(frames), extrapolation=extrapolation)
+    finally:
+        tracker.close()
 
 
 def draw_track(frames, ball_track, trace=7):
