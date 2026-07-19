@@ -144,6 +144,7 @@ def compute_match_stats(
         projected_ball_positions=ball_positions,
         player_positions=player_positions,
     )
+    trajectory_shot_events = list(shot_events)
     bounces, shot_events = resolve_contact_like_bounces(
         bounces,
         shot_events,
@@ -173,6 +174,20 @@ def compute_match_stats(
         player_positions,
         fps,
         projected_bounce_positions=ball_positions,
+    )
+    shot_events = recover_player_contact_shots(
+        shot_events,
+        trajectory_shot_events,
+        bounces,
+        shot_detection_positions,
+        player_tracks,
+        fps,
+    )
+    shot_events = align_shots_to_player_box_contacts(
+        shot_events,
+        shot_detection_positions,
+        player_tracks,
+        fps,
     )
     shot_events = [event for event in shot_events if event.frame > point_start_frame]
     shot_events = enforce_rally_player_alternation(shot_events)
@@ -831,9 +846,17 @@ def resolve_contact_like_bounces(
 
 
 def _nearest_player_box_contact(ball_positions, player_tracks, start_frame: int, fps: int):
+    return _nearest_player_box_contact_in_window(
+        ball_positions,
+        player_tracks,
+        start_frame,
+        start_frame + max(6, int(fps * 0.45)),
+    )
+
+
+def _nearest_player_box_contact_in_window(ball_positions, player_tracks, start_frame: int, end_frame: int):
     best = None
-    end_frame = min(len(ball_positions), start_frame + max(6, int(fps * 0.45)) + 1)
-    for frame_num in range(start_frame, end_frame):
+    for frame_num in range(max(0, start_frame), min(len(ball_positions), end_frame + 1)):
         point = _point_or_none(ball_positions[frame_num])
         if point is None or frame_num >= len(player_tracks):
             continue
@@ -854,6 +877,61 @@ def _point_to_box_distance(point, bbox):
     dx = max(x1 - x, 0, x - x2)
     dy = max(y1 - y, 0, y - y2)
     return float(np.hypot(dx, dy))
+
+
+def recover_player_contact_shots(shot_events, trajectory_events, bounces, ball_positions, player_tracks, fps):
+    """Restore a filtered trajectory event when a later player contact confirms it."""
+    if not trajectory_events or not player_tracks or not bounces:
+        return shot_events
+    recovered = list(shot_events)
+    first_bounce = min(bounces)
+    merge_gap = max(8, int(fps * 0.3))
+    for event in trajectory_events:
+        if event.frame <= first_bounce:
+            continue
+        contact = _nearest_player_box_contact(ball_positions, player_tracks, event.frame, fps)
+        if contact is None:
+            continue
+        frame_num, role = contact
+        if any(abs(existing.frame - frame_num) <= merge_gap for existing in recovered):
+            continue
+        recovered.append(
+            ShotEvent(
+                frame=frame_num,
+                player_role=role or event.player_role,
+                ball_speed_kmh=event.ball_speed_kmh,
+                reason="player_contact_trajectory_recovery",
+            )
+        )
+    return _merge_shot_events(recovered, min_gap=max(6, int(fps * 0.22)))
+
+
+def align_shots_to_player_box_contacts(shot_events, ball_positions, player_tracks, fps):
+    """Align a trajectory change to the closest nearby racket-contact proxy."""
+    if not shot_events or not player_tracks:
+        return shot_events
+    aligned = []
+    radius = max(6, int(fps * 0.5))
+    for event in shot_events:
+        contact = _nearest_player_box_contact_in_window(
+            ball_positions,
+            player_tracks,
+            event.frame - radius,
+            event.frame + radius,
+        )
+        if contact is None:
+            aligned.append(event)
+            continue
+        frame_num, role = contact
+        aligned.append(
+            ShotEvent(
+                frame=frame_num,
+                player_role=role or event.player_role,
+                ball_speed_kmh=event.ball_speed_kmh,
+                reason=event.reason,
+            )
+        )
+    return _merge_shot_events(aligned, min_gap=max(6, int(fps * 0.22)))
 
 
 def _filter_projected_bounce_outliers(bounces: set[int], projected_ball_positions):
