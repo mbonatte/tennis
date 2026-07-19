@@ -43,7 +43,8 @@ def run_analysis_job(public_id: str) -> None:
                 if current and current.status == JobStatus.running:
                     current.current_stage = stage
                     current.progress = max(current.progress, min(99, percent))
-                    current.workflow = record_progress(current.workflow, stage, current.progress, datetime.now(UTC))
+                    if stage != "completed":
+                        current.workflow = record_progress(current.workflow, stage, current.progress, datetime.now(UTC))
                     progress_db.commit()
             logger.info("%s", message, extra={"stage": stage, "progress": percent})
 
