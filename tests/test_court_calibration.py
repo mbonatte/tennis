@@ -40,6 +40,7 @@ def test_suggested_outer_corners_reorders_model_keypoints():
 
 
 def test_render_uses_saved_court_calibration(monkeypatch, sample_video, tmp_path):
+    pytest.importorskip("torch")
     from tennis_analyzer.pipeline.artifact import write_artifact
 
     capture = cv2.VideoCapture(str(sample_video))
