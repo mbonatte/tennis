@@ -4,7 +4,7 @@ import json
 import logging
 import os
 import subprocess
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 
@@ -13,33 +13,13 @@ import numpy as np
 
 from tennis_analyzer.config import ModelPaths
 from tennis_analyzer.errors import AnalysisCancelled, MissingModelError, VideoProcessingError
+from tennis_analyzer.pipeline.chunks import iter_frame_chunks
 from tennis_analyzer.schemas import AnalysisResult, PipelineOptions
 from tennis_analyzer.video import normalize_video, probe_video
 
 ProgressCallback = Callable[[str, int, str], None]
 CancellationCheck = Callable[[], bool]
 logger = logging.getLogger(__name__)
-
-
-def _chunks(path: Path, size: int) -> Iterator[tuple[int, list[np.ndarray]]]:
-    capture = cv2.VideoCapture(str(path))
-    if not capture.isOpened():
-        raise VideoProcessingError("OpenCV could not decode the input video")
-    start = 0
-    try:
-        while True:
-            frames: list[np.ndarray] = []
-            for _ in range(size):
-                ok, frame = capture.read()
-                if not ok:
-                    break
-                frames.append(frame)
-            if not frames:
-                break
-            yield start, frames
-            start += len(frames)
-    finally:
-        capture.release()
 
 
 def _histogram(frame: np.ndarray) -> np.ndarray:
@@ -114,7 +94,8 @@ def analyze_video(
             pose_conf=0.35,
         )
 
-    for start, frames in _chunks(source, selected.chunk_size):
+    for chunk in iter_frame_chunks(source, selected.chunk_size):
+        start, frames = chunk.start_frame, chunk.frames
         _cancelled(cancellation_check)
         if analysis.scene_cut_detection:
             for offset, frame in enumerate(frames):
@@ -196,7 +177,8 @@ def analyze_video(
         raise VideoProcessingError("Could not create the intermediate video")
     visual = selected.visualization
     try:
-        for start, frames in _chunks(source, selected.chunk_size):
+        for chunk in iter_frame_chunks(source, selected.chunk_size):
+            start, frames = chunk.start_frame, chunk.frames
             _cancelled(cancellation_check)
             for offset, frame in enumerate(frames):
                 index = start + offset
