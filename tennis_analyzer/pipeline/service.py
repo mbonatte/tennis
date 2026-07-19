@@ -39,6 +39,67 @@ def _save_result(path: Path, result: AnalysisResult) -> None:
         raise
 
 
+def recompute_court_dependent_events(artifact_path: Path, result_path: Path | None, court_calibration: dict) -> dict:
+    """Reclassify saved bounce events after a static court correction.
+
+    Bounce-frame detection uses the ball trajectory and is retained.  The
+    corrected homography is applied to every saved frame before recomputing
+    in/out regions, shot ownership, and dependent aggregate statistics.
+    """
+    artifact = read_artifact(artifact_path)
+    frame_count = int(artifact.get("frame_count") or 0)
+    if frame_count <= 0:
+        raise VideoProcessingError("Analysis artifact contains no frames")
+    ball_track = artifact.get("ball_track", [])
+    if len(ball_track) != frame_count:
+        raise VideoProcessingError("Analysis artifact ball track is not aligned with its frame count")
+
+    corrected_homography = calibration_homography(court_calibration)
+    corrected_keypoints = calibrated_keypoints(court_calibration)
+    artifact["homographies"] = [corrected_homography] * frame_count
+    artifact["court_keypoints"] = [corrected_keypoints] * frame_count
+    bounces = {int(frame) for frame in artifact.get("bounces", [])}
+    analysis = artifact.get("analysis_options", {})
+    if analysis.get("statistics"):
+        from analysis import compute_match_stats
+
+        metadata = artifact.get("metadata", {})
+        stats = compute_match_stats(
+            ball_track,
+            bounces,
+            int(round(float(metadata.get("fps") or 0))),
+            homography_matrices=artifact["homographies"],
+            player_tracks=artifact.get("player_tracks", []),
+            scene_cuts=artifact.get("scene_cuts", []),
+        ).to_dict()
+        artifact["shots"] = stats["shot_events"]
+        artifact["bounce_events"] = stats["bounce_events"]
+        artifact["player_statistics"] = stats["player_stats"]
+        artifact["bounces"] = [event["frame"] for event in stats["bounce_events"]]
+        summary = dict(artifact.get("summary", {}))
+        summary.update(
+            shot_count=len(stats["shot_events"]),
+            bounce_count=len(stats["bounce_events"]),
+            average_ball_speed_kmh=stats["average_ball_speed_kmh"],
+            max_ball_speed_kmh=stats["max_ball_speed_kmh"],
+        )
+        artifact["summary"] = summary
+
+    write_artifact(artifact_path, {key: value for key, value in artifact.items() if key != "schema_version"})
+    if result_path is not None and result_path.is_file():
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        for key in ("shots", "bounce_events", "player_statistics", "summary"):
+            result_key = "bounces" if key == "bounce_events" else key
+            result[result_key] = artifact.get(key, [])
+        temporary = result_path.with_suffix(".tmp")
+        try:
+            temporary.write_text(json.dumps(result, indent=2), encoding="utf-8")
+            temporary.replace(result_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return artifact
+
+
 def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None, court_calibration=None):
     """Render annotations without loading any analysis model."""
     artifact = read_artifact(Path(artifact_path))

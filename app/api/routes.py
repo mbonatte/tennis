@@ -26,7 +26,7 @@ from app.services.queue import enqueue_analysis, enqueue_render
 from app.services.storage import delete_job_files, resolve_job_file, safe_job_dir, sanitize_filename, stream_upload
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
-from tennis_analyzer.errors import InvalidVideoError
+from tennis_analyzer.errors import InvalidVideoError, VideoProcessingError
 from tennis_analyzer.pipeline.artifact import read_artifact
 from tennis_analyzer.pipeline.court_calibration import (
     CORNER_LABELS,
@@ -34,6 +34,7 @@ from tennis_analyzer.pipeline.court_calibration import (
     create_static_calibration,
     suggested_outer_corners,
 )
+from tennis_analyzer.pipeline.service import recompute_court_dependent_events
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
 from tennis_analyzer.video import probe_video, validate_video
 
@@ -306,9 +307,27 @@ def save_court_calibration(
     for x, y in calibration["image_points"]:
         if not (0 <= x < (job.video_width or 0) and 0 <= y < (job.video_height or 0)):
             raise HTTPException(422, "Court-corner points must be within the source frame")
+    recomputed = False
+    artifact = None
+    try:
+        artifact = recompute_court_dependent_events(
+            resolve_job_file(settings.data_root, job.analysis_artifact_relative_path),
+            resolve_job_file(settings.data_root, job.result_relative_path) if job.result_relative_path else None,
+            calibration,
+        )
+        recomputed = True
+    except VideoProcessingError as exc:
+        logger.warning("Court-event recomputation skipped: %s", exc)
+    except (OSError, ValueError) as exc:
+        logger.exception("Court-event recomputation failed")
+        raise HTTPException(500, "Could not recompute court-dependent events") from exc
     job.court_calibration = calibration
     db.commit()
-    return calibration
+    return {
+        **calibration,
+        "court_events_recomputed": recomputed,
+        "bounce_count": len(artifact.get("bounces", [])) if artifact else 0,
+    }
 
 
 @router.delete("/api/jobs/{public_id}/court-calibration", status_code=204)

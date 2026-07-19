@@ -71,7 +71,7 @@
     if (points.some((point) => !point)) { status.textContent = "Click all four court corners before saving."; return; }
     const response = await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({frame_index: Number(frameInput.value), image_points: points})});
     const data = await response.json();
-    status.textContent = response.ok ? "Court correction saved. New renders will use it." : (data.detail || "Could not save court correction.");
+    status.textContent = response.ok ? (data.court_events_recomputed ? `Court correction saved. Recomputed ${data.bounce_count || 0} court-dependent bounce events; new renders will use them.` : "Court correction saved. This older analysis has no saved event data to recompute.") : (data.detail || "Could not save court correction.");
     if (response.ok) window.setTimeout(() => location.reload(), 800);
   });
   const clear = document.getElementById("clear-court-calibration");
