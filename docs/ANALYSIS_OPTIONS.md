@@ -1,6 +1,6 @@
 # Analysis options
 
-Scene-cut detection and frame-number rendering require no model. Ball tracking requires `tracknet_model.pt`; bounce detection automatically enables ball tracking and also needs `bounce_model.cbm`. Court detection needs `tennis_court.pt`. Player tracking needs `yolo26n.pt`; pose tracking automatically enables player tracking and needs `yolo26n-pose.pt`. Statistics automatically enable ball and court detection. Point analysis automatically enables scene cuts.
+Web uploads always perform scene, ball, court, player, pose, bounce, and statistics analysis so later renders can enable any supported overlay without rerunning inference. The CLI retains selective analysis for diagnostics and development. Rendering options are chosen after web analysis completes; each render is a separate output backed by the saved versioned artifact.
 
 Visual dependencies are server-validated: ball trail → ball tracking; bounce markers → bounce detection; court overlay/keypoints → court detection; player boxes/poses → corresponding player stage; statistics overlay → statistics; history plot → ball tracking. Invalid combinations return HTTP 422.
 
