@@ -25,6 +25,7 @@ dependencies = [
 [project.optional-dependencies]
 ml = [
   "catboost==1.2.8",
+  "lap==0.5.13",
   "matplotlib==3.10.0",
   "numpy==1.26.4",
   "opencv-python-headless==4.11.0.86",
