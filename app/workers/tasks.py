@@ -49,7 +49,7 @@ def run_render_job(public_id: str) -> None:
                 db.commit()
 
     try:
-        output = render_from_artifact(source, artifact, output_dir, options, progress)
+        output = render_from_artifact(source, artifact, output_dir, options, progress, analysis.court_calibration)
         with SessionLocal() as db:
             item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
             item.status, item.progress, item.current_stage = JobStatus.completed, 100, "completed"

@@ -17,6 +17,7 @@ from tennis_analyzer.errors import AnalysisCancelled, MissingModelError, VideoPr
 from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
 from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
 from tennis_analyzer.pipeline.chunks import iter_frame_chunks
+from tennis_analyzer.pipeline.court_calibration import calibrated_keypoints, calibration_homography
 from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
 from tennis_analyzer.schemas import AnalysisResult, PipelineOptions
@@ -37,7 +38,7 @@ def _save_result(path: Path, result: AnalysisResult) -> None:
         raise
 
 
-def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None):
+def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None, court_calibration=None):
     """Render annotations without loading any analysis model."""
     artifact = read_artifact(Path(artifact_path))
     source, destination = Path(source), Path(destination)
@@ -56,6 +57,11 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     keypoints = artifact.get("court_keypoints", [])
     player_tracks = artifact.get("player_tracks", [])
     summary = artifact.get("summary", {})
+    if court_calibration:
+        corrected_homography = calibration_homography(court_calibration)
+        corrected_keypoints = calibrated_keypoints(court_calibration)
+        homographies = [corrected_homography] * expected_frames
+        keypoints = [corrected_keypoints] * expected_frames
     raw_output = destination / ".rendered.mp4"
     output = destination / "rendered.mp4"
     writer = cv2.VideoWriter(

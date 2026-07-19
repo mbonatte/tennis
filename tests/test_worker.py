@@ -81,8 +81,9 @@ def test_render_worker_uses_saved_artifact_without_analysis_models(monkeypatch, 
         db.commit()
         render_id = render.public_id
 
-    def fake_render(source, artifact, destination, options, progress):
+    def fake_render(source, artifact, destination, options, progress, court_calibration):
         assert artifact == artifact_path
+        assert court_calibration is None
         progress("rendering", 50, "half")
         destination.mkdir(parents=True, exist_ok=True)
         output = destination / "rendered.mp4"
