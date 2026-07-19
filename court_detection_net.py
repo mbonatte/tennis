@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import torch
-from tqdm import tqdm
 
 from homography import get_trans_matrix, refer_kps  # Homography utilities
 from postprocess import refine_kps  # Custom function to refine keypoint locations
@@ -42,7 +41,7 @@ class CourtDetectorNet:
         matrixes_res = []   # Transformation matrices
 
         # Loop over each frame
-        for num_frame, image in enumerate(tqdm(frames)):
+        for image in frames:
             # Resize image to model input size
             img = cv2.resize(image, (output_width, output_height))
             

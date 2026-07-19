@@ -21,7 +21,10 @@ class PlayerStage:
         self.tracker = tracker
 
     def process_chunk(self, frames: list[np.ndarray]):
-        tracks, _ = self.tracker.track_frames(frames)
+        tracks = []
+        for frame in frames:
+            players, _raw_result = self.tracker.track_frame(frame)
+            tracks.append(players)
         return tracks
 
     def draw(self, frame, tracks):
