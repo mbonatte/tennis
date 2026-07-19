@@ -144,6 +144,13 @@ def compute_match_stats(
         projected_ball_positions=ball_positions,
         player_positions=player_positions,
     )
+    bounces, shot_events = resolve_contact_like_bounces(
+        bounces,
+        shot_events,
+        shot_detection_positions,
+        player_tracks,
+        fps,
+    )
     shot_events = _recover_initial_contact_without_bounces(
         shot_events,
         shot_detection_positions,
@@ -764,6 +771,11 @@ def _estimate_pre_bounce_serve_hit(ball_positions, bounce_frame: int, fps: int):
         if prev_v is None or next_v is None:
             continue
 
+        # A racket contact reverses the local vertical direction.  This is a
+        # more precise serve cue than the subsequent downward-flight peak.
+        if prev_v > 0 and next_v < 0:
+            return frame_num
+
         # Prefer the first frame where the serve starts moving sharply downward.
         if next_v >= 12:
             return frame_num
@@ -775,6 +787,73 @@ def _estimate_pre_bounce_serve_hit(ball_positions, bounce_frame: int, fps: int):
 
     candidates.sort(reverse=True)
     return candidates[0][1]
+
+
+def resolve_contact_like_bounces(
+    bounces: set[int],
+    shot_events: list[ShotEvent],
+    ball_positions,
+    player_tracks,
+    fps: int,
+) -> tuple[set[int], list[ShotEvent]]:
+    """Turn a bounce-model false positive into a shot when contact confirms it.
+
+    The learned bounce model can label a sharp racket reversal as a bounce.
+    We only override it when a trajectory candidate immediately follows and
+    the ball reaches a saved player box shortly afterward.
+    """
+    if not bounces or not shot_events or not player_tracks:
+        return set(bounces), shot_events
+
+    refined_bounces = set(bounces)
+    refined_shots = list(shot_events)
+    max_candidate_gap = max(2, int(fps * 0.16))
+    for bounce_frame in sorted(bounces):
+        candidates = [event for event in refined_shots if 0 < event.frame - bounce_frame <= max_candidate_gap]
+        if not candidates:
+            continue
+        contact = _nearest_player_box_contact(ball_positions, player_tracks, bounce_frame, fps)
+        if contact is None:
+            continue
+        contact_frame, role = contact
+        event = min(candidates, key=lambda item: item.frame)
+        refined_bounces.discard(bounce_frame)
+        refined_shots.remove(event)
+        refined_shots.append(
+            ShotEvent(
+                frame=contact_frame,
+                player_role=role or event.player_role,
+                ball_speed_kmh=event.ball_speed_kmh,
+                reason="player_contact_reclassified_from_bounce",
+            )
+        )
+    return refined_bounces, _merge_shot_events(refined_shots, min_gap=max(6, int(fps * 0.22)))
+
+
+def _nearest_player_box_contact(ball_positions, player_tracks, start_frame: int, fps: int):
+    best = None
+    end_frame = min(len(ball_positions), start_frame + max(6, int(fps * 0.45)) + 1)
+    for frame_num in range(start_frame, end_frame):
+        point = _point_or_none(ball_positions[frame_num])
+        if point is None or frame_num >= len(player_tracks):
+            continue
+        for player in player_tracks[frame_num] or []:
+            bbox = player.get("bbox") if isinstance(player, dict) else player.bbox
+            role = player.get("role") if isinstance(player, dict) else player.role
+            if not bbox:
+                continue
+            distance = _point_to_box_distance(point, bbox)
+            if distance <= 40 and (best is None or distance < best[0]):
+                best = (distance, frame_num, role)
+    return None if best is None else (best[1], best[2])
+
+
+def _point_to_box_distance(point, bbox):
+    x, y = point
+    x1, y1, x2, y2 = bbox
+    dx = max(x1 - x, 0, x - x2)
+    dy = max(y1 - y, 0, y - y2)
+    return float(np.hypot(dx, dy))
 
 
 def _filter_projected_bounce_outliers(bounces: set[int], projected_ball_positions):
