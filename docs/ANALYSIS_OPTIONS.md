@@ -4,4 +4,4 @@ Scene-cut detection and frame-number rendering require no model. Ball tracking r
 
 Visual dependencies are server-validated: ball trail → ball tracking; bounce markers → bounce detection; court overlay/keypoints → court detection; player boxes/poses → corresponding player stage; statistics overlay → statistics; history plot → ball tracking. Invalid combinations return HTTP 422.
 
-Statistics, point boundaries, shots, bounces, speeds, distances, and in/out classifications are explicitly experimental. Pose selection currently uses the hybrid box/pose renderer. Court/model processing is chunk bounded, which may introduce discontinuities at chunk boundaries.
+Statistics, point boundaries, shots, bounces, speeds, distances, and in/out classifications are explicitly experimental. Pose selection uses a job-scoped hybrid box/pose tracker whose ByteTrack state persists across all chunks. TrackNet preserves its two required prior frames at boundaries and performs continuity filtering globally. Court inference is frame-independent and its model persists across chunks; homographies are not smoothed, so difficult footage may still show ordinary frame-to-frame jitter.
