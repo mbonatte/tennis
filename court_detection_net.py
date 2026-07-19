@@ -2,15 +2,15 @@ import cv2
 import numpy as np
 import torch
 
-from homography import get_trans_matrix, refer_kps  # Homography utilities
-from postprocess import refine_kps  # Custom function to refine keypoint locations
+from homography import get_trans_matrix, refer_kps
+from postprocess import refine_kps
 from tennis_analyzer.checkpoints import normalize_state_dict
 from tennis_analyzer.errors import VideoProcessingError
-from tracknet import Tracker  # Custom neural network model for keypoint tracking
+from tracknet import Tracker
+
 
 class CourtDetectorNet:
     def __init__(self, path_model=None, device="cpu", model=None):
-        # Initialize the neural network with 15 output channels (keypoints/heatmaps)
         self.model = model or Tracker(out_channels=15)
         self.device = torch.device(device)
         if path_model:
@@ -23,114 +23,41 @@ class CourtDetectorNet:
         self.model.eval()
 
     @torch.inference_mode()
-    def infer_model(self, frames):
+    def infer_model(self, frames, batch_size=1):
         if not frames:
             return [], []
-        # Define output resolution for resizing input frames
-        output_width = 640
-        output_height = 360
+        if batch_size <= 0:
+            raise ValueError("court batch size must be positive")
+        matrices, keypoints = [], []
+        for start in range(0, len(frames), batch_size):
+            batch = frames[start : start + batch_size]
+            inputs = np.stack([np.moveaxis(cv2.resize(frame, (640, 360)), 2, 0) for frame in batch]).astype(np.float32)
+            predictions = torch.sigmoid(self.model(torch.from_numpy(inputs / 255.0).to(self.device))).cpu().numpy()
+            for image, prediction in zip(batch, predictions, strict=True):
+                points = self._points(image, prediction)
+                matrix = get_trans_matrix(points)
+                projected = None
+                if matrix is not None:
+                    projected = cv2.perspectiveTransform(refer_kps, matrix)
+                    matrix = cv2.invert(matrix)[1]
+                matrices.append(matrix)
+                keypoints.append(projected)
+        return matrices, keypoints
 
-        orig_h, orig_w = frames[0].shape[:2]
-
-        # Scale factor used later to map predictions back to original resolution
-        scale_x = orig_w / output_width
-        scale_y = orig_h / output_height
-        
-        # Lists to store results
-        kps_res = []        # Keypoints results
-        matrixes_res = []   # Transformation matrices
-
-        # Loop over each frame
-        for image in frames:
-            # Resize image to model input size
-            img = cv2.resize(image, (output_width, output_height))
-            
-            # Normalize pixel values to [0, 1]
-            inp = (img.astype(np.float32) / 255.)
-            
-            # Change image shape from (H, W, C) to (C, H, W)
-            inp = torch.from_numpy(np.rollaxis(inp, 2, 0))
-            
-            # Add batch dimension → shape becomes (1, C, H, W)
-            inp = inp.unsqueeze(0)
-
-            # Run inference through the model
-            out = self.model(inp.to(self.device, dtype=torch.float32))[0]
-            
-            # Apply sigmoid to convert outputs to probabilities
-            pred = torch.sigmoid(out).cpu().numpy()
-
-            # Store detected keypoints for this frame
-            points = []
-
-            # Loop through first 14 keypoint heatmaps (ignore last channel)
-            for kps_num in range(14):
-                # Convert heatmap to 0–255 grayscale image
-                heatmap = (pred[kps_num] * 255).astype(np.uint8)
-                
-                # Apply binary threshold to highlight strong responses
-                low_thresh = 170
-                ret, heatmap = cv2.threshold(heatmap, low_thresh, 255, cv2.THRESH_BINARY)
-                
-                # Detect circular blobs (keypoints) using Hough Circle Transform
-                circles = cv2.HoughCircles(
-                    heatmap,
-                    cv2.HOUGH_GRADIENT,
-                    dp=1,
-                    minDist=20,
-                    param1=50,
-                    param2=2,
-                    minRadius=10,
-                    maxRadius=25
-                )
-
-                # If a circle (keypoint) is detected
-                if circles is not None:
-                    orig_h, orig_w = image.shape[:2]
-                    scale_x = orig_w / output_width
-                    scale_y = orig_h / output_height
-                    
-                    # Extract predicted x and y coordinates and scale them
-                    x_pred = circles[0][0][0] * scale_x
-                    y_pred = circles[0][0][1] * scale_y
-
-                    # Refine keypoints for most indices (skip some specific ones)
-                    if kps_num not in [8, 12, 9] and x_pred and y_pred:
-                        x_pred, y_pred = refine_kps(
-                            image,
-                            int(y_pred),
-                            int(x_pred),
-                            crop_size=40
-                        )
-
-                    # Store detected point as (x, y)
-                    points.append((x_pred, y_pred))
-                
-                else:
-                    # If no keypoint detected, store None
-                    points.append(None)
-
-            use_homography = True
-            if use_homography:
-                # Compute homography transformation matrix from detected points
-                matrix_trans = get_trans_matrix(points) 
-            
-                # Reset points (will store transformed reference points instead)
-                points = None
-                
-                # If a valid transformation matrix was found
-                if matrix_trans is not None:
-                    # Transform reference keypoints into image space
-                    points = cv2.perspectiveTransform(refer_kps, matrix_trans)
-                    
-                    # Invert the transformation matrix
-                    matrix_trans = cv2.invert(matrix_trans)[1]
-
-                matrixes_res.append(matrix_trans)
-            
-            # Store results for this frame
-            kps_res.append(points)
-            
-            
-        # Return all transformation matrices and keypoints
-        return matrixes_res, kps_res
+    @staticmethod
+    def _points(image, prediction):
+        height, width = image.shape[:2]
+        points = []
+        for index in range(14):
+            heatmap = (prediction[index] * 255).astype(np.uint8)
+            _, heatmap = cv2.threshold(heatmap, 170, 255, cv2.THRESH_BINARY)
+            circles = cv2.HoughCircles(heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=2, minRadius=10, maxRadius=25)
+            if circles is None:
+                points.append(None)
+                continue
+            x = circles[0][0][0] * width / 640
+            y = circles[0][0][1] * height / 360
+            if index not in [8, 9, 12] and x and y:
+                x, y = refine_kps(image, int(y), int(x), crop_size=40)
+            points.append((x, y))
+        return points

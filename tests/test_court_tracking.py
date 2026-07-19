@@ -18,7 +18,8 @@ def test_court_tracker_loads_once_and_reuses_detector(monkeypatch):
         def __init__(self, path, device):
             created.append((Path(path), str(device)))
 
-        def infer_model(self, frames):
+        def infer_model(self, frames, batch_size=1):
+            assert batch_size == 1
             return [None] * len(frames), [None] * len(frames)
 
     monkeypatch.setattr(court, "CourtDetectorNet", FakeDetector)
@@ -35,7 +36,7 @@ def test_court_tracker_loads_once_and_reuses_detector(monkeypatch):
 
 def test_court_tracker_rejects_misaligned_results():
     class BadDetector:
-        def infer_model(self, frames):
+        def infer_model(self, frames, batch_size=1):
             return [None], [None]
 
     tracker = court.CourtTracker(BadDetector(), torch.device("cpu"))

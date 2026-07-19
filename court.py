@@ -14,19 +14,20 @@ from tennis_analyzer.errors import VideoProcessingError
 class CourtTracker:
     """Own one court detector for an entire analysis stage."""
 
-    def __init__(self, detector, device):
+    def __init__(self, detector, device, batch_size=None):
         self.detector = detector
         self.device = torch.device(device)
+        self.batch_size = batch_size or (8 if self.device.type == "cuda" else 1)
 
     @classmethod
-    def from_checkpoint(cls, model_path="weights/tennis_court.pt", device_name=None):
+    def from_checkpoint(cls, model_path="weights/tennis_court.pt", device_name=None, batch_size=None):
         device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
-        return cls(CourtDetectorNet(model_path, device), device)
+        return cls(CourtDetectorNet(model_path, device), device, batch_size)
 
     def process_chunk(self, frames):
         if not frames:
             return [], []
-        homographies, keypoints = self.detector.infer_model(frames)
+        homographies, keypoints = self.detector.infer_model(frames, batch_size=self.batch_size)
         if len(homographies) != len(frames) or len(keypoints) != len(frames):
             raise VideoProcessingError("Court inference returned an unexpected number of frame results")
         return homographies, keypoints
