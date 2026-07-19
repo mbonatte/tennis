@@ -15,6 +15,7 @@ import numpy as np
 from tennis_analyzer.config import ModelPaths
 from tennis_analyzer.errors import AnalysisCancelled, MissingModelError, VideoProcessingError
 from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
+from tennis_analyzer.pipeline.artifact import write_artifact
 from tennis_analyzer.pipeline.chunks import iter_frame_chunks
 from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
@@ -257,6 +258,26 @@ def analyze_video(
     if analysis.bounce_detection or analysis.statistics:
         progress.update("events", 1, 1, "Computed events and summary statistics")
 
+    artifact_path = destination / "analysis-artifact.json"
+    write_artifact(
+        artifact_path,
+        {
+            "metadata": metadata,
+            "analysis_options": asdict(analysis),
+            "frame_count": frame_total,
+            "ball_track": ball_track,
+            "homographies": homographies,
+            "court_keypoints": keypoints,
+            "player_tracks": player_tracks,
+            "bounces": sorted(bounces),
+            "shots": shots,
+            "bounce_events": bounce_events,
+            "player_statistics": player_statistics,
+            "summary": summary,
+            "scene_cuts": scene_cuts,
+        },
+    )
+
     raw_output = destination / ".annotated.mp4"
     raw_output.unlink(missing_ok=True)
     writer = cv2.VideoWriter(
@@ -372,6 +393,7 @@ def analyze_video(
         metadata=metadata,
         analysis_options=asdict(analysis),
         visualization_options=asdict(visual),
+        analysis_artifact=artifact_path.name,
         shots=shots,
         bounces=bounce_events,
         player_statistics=player_statistics,

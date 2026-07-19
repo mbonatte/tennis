@@ -83,6 +83,10 @@ def run_analysis_job(public_id: str) -> None:
                 job.result_relative_path = str(
                     (output_dir / result.result_json).relative_to(settings.data_root.resolve())
                 )
+                if result.analysis_artifact:
+                    job.analysis_artifact_relative_path = str(
+                        (output_dir / result.analysis_artifact).relative_to(settings.data_root.resolve())
+                    )
                 job.output_size = (output_dir / result.output_video).stat().st_size
             db.commit()
     except AnalysisCancelled:

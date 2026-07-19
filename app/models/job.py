@@ -38,6 +38,7 @@ class AnalysisJob(Base):
     input_relative_path: Mapped[str] = mapped_column(String(500))
     output_video_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     result_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    analysis_artifact_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     error_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     internal_diagnostic: Mapped[str | None] = mapped_column(Text, nullable=True)

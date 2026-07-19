@@ -114,6 +114,7 @@ class AnalysisResult:
     metadata: VideoMetadata
     analysis_options: dict[str, bool]
     visualization_options: dict[str, bool]
+    analysis_artifact: str | None = None
     shots: list[dict[str, Any]] = field(default_factory=list)
     bounces: list[dict[str, Any]] = field(default_factory=list)
     player_statistics: dict[str, Any] = field(default_factory=dict)
