@@ -90,7 +90,8 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                         homographies[index],
                         ball_track[index],
                         index in bounces,
-                        bounce_history=bounce_history,
+                        None,
+                        bounce_history,
                     )
                 if visual.bounce_markers and index in bounces:
                     point = ball_track[index]
