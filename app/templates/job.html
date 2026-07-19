@@ -141,6 +141,17 @@
             </div>
           </div>
           <div class="analysis-preview">
+            <div class="court-scene">
+              <div class="stands"></div>
+              <div class="court-surface"><div class="service-line"></div></div>
+              <div class="net"></div>
+              <div class="player-figure p1"></div>
+              <div class="player-figure p2"></div>
+              <div class="ball-path-arc one"></div>
+              <div class="ball-path-arc two"></div>
+              <div class="scorebug"><strong>FAR PLAYER</strong>&nbsp;&nbsp;0&nbsp; 15<br><strong>NEAR PLAYER</strong>&nbsp;0&nbsp; 30</div>
+              <div class="video-controls-bar"><div class="play-icon">▶</div><span>03:24 / 10:01</span><div class="timeline-bar"></div><span>◼</span><span>⛶</span></div>
+            </div>
             {% if job.analysis_artifact_relative_path %}
               <img src="/jobs/{{ job.public_id }}/court-preview.jpg?frame_index={{ preview_frame }}" alt="A representative frame from the analyzed tennis video">
             {% endif %}
@@ -192,17 +203,16 @@
     </section>
 
     {% if point_scenes %}
-      <section class="card points-section" id="point-scenes">
-        <div class="section-heading">
+      <section class="card section" id="point-scenes">
+        <div class="section-title">
           <div>
-            <p class="eyebrow">Explore</p>
-            <h2>Points <span class="count">{{ point_scenes|length }}</span></h2>
-            <p class="notice">Preview a detected rally or send it directly to the render studio.</p>
+            <h2>Points</h2>
+            <p>Preview a detected point or send it directly to the render studio.</p>
           </div>
-          <span class="scroll-hint">Scroll to explore →</span>
+          <a class="link" href="#point-scenes">View all {{ point_scenes|length }} →</a>
         </div>
 
-        <div class="point-grid">
+        <div class="points-row">
           {% for scene in point_scenes %}
             {% set idx = loop.index0 %}
             {% set sp = scorecard_points[idx] if idx < scorecard_points|length else {} %}
@@ -210,31 +220,23 @@
             {% set end_sec = (scene.end_frame / fps) if fps else 0 %}
             {% set point_shots = shots|selectattr('frame', 'ge', scene.start_frame)|selectattr('frame', 'le', scene.end_frame)|list %}
             {% set point_bounces = bounces|selectattr('frame', 'ge', scene.start_frame)|selectattr('frame', 'le', scene.end_frame)|list %}
+            {% set start_mm = '%02d:%02d'|format((start_sec / 60)|int, (start_sec % 60)|int) %}
+            {% set end_mm = '%02d:%02d'|format((end_sec / 60)|int, (end_sec % 60)|int) %}
 
             <article class="point-card" data-point-index="{{ idx }}">
-              <div class="point-header">
-                <span class="point-number"><i aria-hidden="true"></i>{{ scene.id.replace('point-', 'Point ').replace('-', ' ') }}</span>
-                <span class="point-time">{{ '%.1f'|format(start_sec) }}–{{ '%.1f'|format(end_sec) }}s</span>
+              <div class="point-top">
+                <strong>● {{ scene.id.replace('point-', 'Point ').replace('-', ' ') }}</strong>
+                <span>{{ start_mm }}–{{ end_mm }}</span>
               </div>
-
-              <div class="point-preview" id="preview-{{ idx }}">
-                <button type="button" class="preview-btn" onclick="loadPointPreview({{ idx }}, {{ scene.start_frame }}, {{ scene.end_frame }})">
-                  <span class="preview-btn-icon" aria-hidden="true">▶</span>
-                  <span>Load preview</span>
-                </button>
-                <div class="preview-canvas-wrapper" hidden><canvas class="preview-canvas"></canvas></div>
-              </div>
-
-              <dl class="point-stats">
-                <div><dt>Shots</dt><dd>{{ point_shots|length }}</dd></div>
-                <div><dt>Bounces</dt><dd>{{ point_bounces|length }}</dd></div>
+              <div class="thumb"></div>
+              <div class="point-stats">
+                <span>Shots</span><strong>{{ point_shots|length }}</strong>
+                <span>Bounces</span><strong>{{ point_bounces|length }}</strong>
                 {% if sp %}
-                  <div><dt>Winner</dt><dd>{{ sp.winner|replace('_', ' ') if sp.winner else 'Unknown' }}</dd></div>
-                  <div><dt>Score</dt><dd>{{ sp.score_after.top_player if sp.score_after else '—' }}–{{ sp.score_after.bottom_player if sp.score_after else '—' }}</dd></div>
+                  <span>Score</span><strong>{{ sp.score_after.top_player if sp.score_after else '—' }}–{{ sp.score_after.bottom_player if sp.score_after else '—' }}</strong>
                 {% endif %}
-              </dl>
-
-              <button type="button" class="button secondary render-point-btn" onclick="selectPointForRender({{ scene.start_frame }}, {{ scene.end_frame }})">Create this clip</button>
+              </div>
+              <button class="point-btn" onclick="selectPointForRender({{ scene.start_frame }}, {{ scene.end_frame }})">Create this clip</button>
             </article>
           {% endfor %}
         </div>
@@ -650,10 +652,12 @@ const jobId = "{{ job.public_id }}";
 async function loadPointPreview(idx, startFrame, endFrame) {
   const root = document.querySelector(`#preview-${idx}`);
   if (!root) return;
+  const thumb = root.querySelector(".thumb");
   const button = root.querySelector(".preview-btn");
   const wrapper = root.querySelector(".preview-canvas-wrapper");
   const canvas = wrapper.querySelector(".preview-canvas");
   const label = button.querySelector("span:last-child");
+  if (thumb) thumb.style.display = "none";
   label.textContent = "Loading preview…";
   button.disabled = true;
 

@@ -75,6 +75,27 @@ nav a:hover {
   opacity: 1;
 }
 
+.nav-link {
+  font-size: 0.86rem;
+}
+
+.nav-spacer {
+  flex: 1;
+}
+
+.icon-btn {
+  width: 36px;
+  height: 36px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
 .brand {
   margin-right: auto;
   font-size: 1.23rem;
@@ -201,6 +222,16 @@ textarea:focus-visible {
 
 .danger:hover {
   background: var(--red-dark);
+}
+
+.ghost {
+  background: var(--green-50);
+  color: var(--green-800);
+  border: 1px solid #cfe0d4;
+}
+
+.ghost:hover {
+  background: #dcebdf;
 }
 
 .card,
@@ -542,163 +573,6 @@ tbody tr:hover {
   border-color: #bcd7c6;
 }
 
-/* Workflow: compact stepper for completed jobs, readable table otherwise. */
-#job-status {
-  overflow: hidden;
-  margin-bottom: 1rem;
-  padding: 1.1rem 1.35rem;
-}
-
-#job-status .status-line {
-  min-height: 38px;
-}
-
-#job-status .status-line > span:last-child {
-  color: var(--muted);
-  font-size: 0.78rem;
-  white-space: nowrap;
-}
-
-#job-status .progress-label {
-  display: block;
-  margin-top: 0.8rem;
-  color: var(--muted);
-  font-size: 0.78rem;
-  font-weight: 750;
-}
-
-#job-status .workflow-heading {
-  margin-top: 1.2rem;
-}
-
-#job-status.status.completed .status-line {
-  display: grid;
-  grid-template-columns: 34px minmax(175px, auto) 1fr auto;
-  gap: 0.8rem;
-}
-
-#job-status.status.completed .status-line::before {
-  content: "✓";
-  grid-column: 1;
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: var(--green-700);
-  font-weight: 900;
-}
-
-#job-status.status.completed .status-line .badge {
-  display: none;
-}
-
-#job-status.status.completed .status-line strong {
-  grid-column: 2;
-  text-transform: capitalize;
-  font-size: 0.9rem;
-}
-
-#job-status.status.completed .status-line > span:last-child {
-  grid-column: 4;
-}
-
-#job-status.status.completed > .progress-label,
-#job-status.status.completed > progress,
-#job-status.status.completed .workflow-heading {
-  display: none;
-}
-
-#job-status.status.completed .table-wrap {
-  overflow: visible;
-  margin-top: 0.35rem;
-}
-
-#job-status.status.completed .workflow-table {
-  min-width: 0;
-  table-layout: fixed;
-}
-
-#job-status.status.completed .workflow-table thead {
-  display: none;
-}
-
-#job-status.status.completed .workflow-table tbody {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(92px, 1fr);
-  gap: 0.5rem;
-  margin-top: -39px;
-  padding-left: 245px;
-}
-
-#job-status.status.completed .workflow-table tr {
-  position: relative;
-  display: block;
-  min-width: 0;
-  padding: 31px 0.25rem 0;
-  text-align: center;
-  background: transparent !important;
-}
-
-#job-status.status.completed .workflow-table tr:not(:first-child)::before {
-  content: "";
-  position: absolute;
-  top: 12px;
-  right: 50%;
-  width: calc(100% + 0.5rem);
-  height: 1px;
-  background: #cad7cf;
-}
-
-#job-status.status.completed .workflow-table tr::after {
-  content: "✓";
-  position: absolute;
-  z-index: 1;
-  top: 0;
-  left: 50%;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  transform: translateX(-50%);
-  color: #fff;
-  background: var(--green-700);
-  box-shadow: 0 0 0 5px #fff;
-  font-size: 0.66rem;
-  font-weight: 900;
-}
-
-#job-status.status.completed .workflow-table td {
-  display: none;
-  border: 0;
-  padding: 0;
-  text-align: center;
-}
-
-#job-status.status.completed .workflow-table td:first-child,
-#job-status.status.completed .workflow-table td:last-child {
-  display: block;
-}
-
-#job-status.status.completed .workflow-table td:first-child strong {
-  display: block;
-  font-size: 0.69rem;
-  line-height: 1.2;
-}
-
-#job-status.status.completed .workflow-table td:last-child {
-  margin-top: 0.24rem;
-  color: var(--green-700);
-  font-size: 0.64rem;
-}
-
-#job-status.status.completed .workflow-options {
-  display: none;
-}
-
 /* Main result overview */
 .results-overview {
   display: grid;
@@ -772,10 +646,173 @@ tbody tr:hover {
   display: grid;
   place-items: center;
   color: #fff;
-  background:
-    linear-gradient(90deg, transparent 49.7%, rgba(255, 255, 255, 0.42) 49.7% 50.3%, transparent 50.3%),
-    linear-gradient(0deg, transparent 49.5%, rgba(255, 255, 255, 0.38) 49.5% 50.5%, transparent 50.5%),
-    linear-gradient(145deg, #1c4e36, #0c271a 65%);
+}
+
+/* Court-scene illustration for the video preview placeholder */
+.court-scene {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(#1a2f24 0 15%, #224f3b 15% 100%);
+  overflow: hidden;
+}
+
+.stands {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 27%;
+  background: repeating-linear-gradient(90deg, #1a2b35 0 18px, #243947 18px 36px);
+  opacity: 0.8;
+}
+
+.court-surface {
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  top: 18%;
+  bottom: 8%;
+  background: #3d67a4;
+  clip-path: polygon(15% 0, 85% 0, 100% 100%, 0 100%);
+  border: 5px solid #d7edf2;
+  box-shadow: 0 0 0 14px #476f4f;
+}
+
+.court-surface::before,
+.court-surface::after {
+  content: "";
+  position: absolute;
+  background: #e7f0ed;
+}
+
+.court-surface::before {
+  left: 49.5%;
+  top: 0;
+  width: 1.5%;
+  height: 100%;
+}
+
+.court-surface::after {
+  left: 0;
+  right: 0;
+  top: 48%;
+  height: 2%;
+}
+
+.service-line {
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 29%;
+  bottom: 29%;
+  border-top: 3px solid #e7f0ed;
+  border-bottom: 3px solid #e7f0ed;
+}
+
+.net {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  top: 48.5%;
+  height: 2px;
+  background: #fff;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.45);
+}
+
+.player-figure {
+  position: absolute;
+  width: 16px;
+  height: 30px;
+  border-radius: 50% 50% 40% 40%;
+  background: #f5f5f5;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.35);
+}
+
+.player-figure.p1 {
+  left: 49%;
+  top: 31%;
+  transform: scale(0.75);
+}
+
+.player-figure.p2 {
+  left: 55%;
+  bottom: 15%;
+  background: #f5d348;
+}
+
+.ball-path-arc {
+  position: absolute;
+  border-top: 3px solid #f8b943;
+  border-radius: 50%;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+.ball-path-arc.one {
+  left: 46%;
+  top: 40%;
+  width: 160px;
+  height: 110px;
+  transform: rotate(12deg);
+}
+
+.ball-path-arc.two {
+  left: 34%;
+  top: 37%;
+  width: 120px;
+  height: 90px;
+  border-color: #57d17b;
+  transform: rotate(-13deg);
+}
+
+.scorebug {
+  position: absolute;
+  left: 14px;
+  bottom: 48px;
+  background: #0a274a;
+  color: #fff;
+  border-radius: 5px;
+  padding: 8px 10px;
+  font-size: 10px;
+  line-height: 1.5;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, 0.35);
+}
+
+.video-controls-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  color: #fff;
+  font-size: 11px;
+}
+
+.play-icon {
+  width: 23px;
+  height: 23px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.timeline-bar {
+  height: 3px;
+  flex: 1;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  overflow: hidden;
+}
+
+.timeline-bar::before {
+  content: "";
+  display: block;
+  width: 24%;
+  height: 100%;
+  background: #fff;
 }
 
 .analysis-preview img {
@@ -906,39 +943,26 @@ tbody tr:hover {
 }
 
 /* Points */
-.points-section {
-  overflow: hidden;
-}
-
-.scroll-hint {
-  align-self: flex-end;
-  color: var(--green-700);
-  font-size: 0.72rem;
-  font-weight: 750;
-  white-space: nowrap;
-}
-
-.point-grid {
-  margin-top: 0.2rem;
-  padding: 0.1rem 0.05rem 0.72rem;
+.points-row {
   display: flex;
-  gap: 0.75rem;
+  gap: 10px;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
   scroll-snap-type: x proximity;
   scrollbar-width: thin;
   scrollbar-color: #b8c8be transparent;
+  padding-bottom: 4px;
 }
 
 .point-card {
-  flex: 0 0 215px;
+  flex: 0 0 210px;
   min-width: 0;
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 0.76rem;
+  padding: 12px;
   display: flex;
   flex-direction: column;
-  gap: 0.64rem;
+  gap: 10px;
   background: #fff;
   scroll-snap-align: start;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
@@ -950,148 +974,88 @@ tbody tr:hover {
   transform: translateY(-1px);
 }
 
-.point-header {
+.point-top {
   display: flex;
-  align-items: baseline;
   justify-content: space-between;
-  gap: 0.5rem;
+  gap: 8px;
+  font-size: 11px;
 }
 
-.point-number {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  font-size: 0.76rem;
-  font-weight: 800;
+.point-top strong {
+  font-size: 12px;
 }
 
-.point-number i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--green-600);
-}
-
-.point-time {
+.point-top span {
   color: var(--muted);
-  font-size: 0.66rem;
-  white-space: nowrap;
 }
 
-.point-preview {
+.thumb {
   position: relative;
-  overflow: hidden;
-  min-height: 105px;
+  height: 92px;
   border-radius: 9px;
-  background: #102a1b;
+  overflow: hidden;
+  background: linear-gradient(160deg, #274336, #356d4e);
 }
 
-.preview-btn {
-  position: relative;
-  isolation: isolate;
-  overflow: hidden;
-  width: 100%;
-  min-height: 105px;
-  border: 0;
-  border-radius: 9px;
-  padding: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.38rem;
-  color: #fff;
-  background:
-    linear-gradient(90deg, transparent 49.5%, rgba(255, 255, 255, 0.72) 49.5% 50.5%, transparent 50.5%),
-    linear-gradient(0deg, transparent 48%, rgba(255, 255, 255, 0.62) 48% 50%, transparent 50%),
-    linear-gradient(150deg, #416d54, #163c28 60%, #0b2518);
-  box-shadow: none;
-  font-size: 0.7rem;
-}
-
-.preview-btn::before,
-.preview-btn::after {
+.thumb::before {
   content: "";
   position: absolute;
-  z-index: -1;
-  border: 1px solid rgba(255, 255, 255, 0.62);
+  left: 16%;
+  right: 16%;
+  top: 12%;
+  bottom: 7%;
+  background: #4d72a7;
+  clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
+  border: 2px solid rgba(255, 255, 255, 0.75);
 }
 
-.preview-btn::before {
-  inset: 22% 18%;
-}
-
-.preview-btn::after {
-  inset: 35% 30%;
-}
-
-.preview-btn:hover {
-  background:
-    linear-gradient(90deg, transparent 49.5%, rgba(255, 255, 255, 0.72) 49.5% 50.5%, transparent 50.5%),
-    linear-gradient(0deg, transparent 48%, rgba(255, 255, 255, 0.62) 48% 50%, transparent 50%),
-    linear-gradient(150deg, #4c7d61, #19472f 60%, #0c2c1c);
-}
-
-.preview-btn-icon {
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(255, 255, 255, 0.62);
+.thumb::after {
+  content: "▶";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
+  background: rgba(255, 255, 255, 0.88);
   display: grid;
   place-items: center;
+  color: var(--green-900);
+  font-size: 12px;
   padding-left: 2px;
-  background: rgba(0, 0, 0, 0.2);
-  font-size: 0.66rem;
-}
-
-.preview-btn.is-error {
-  background: #733131;
-}
-
-.preview-canvas-wrapper {
-  width: 100%;
-  height: 105px;
-  background: #edf3ee;
-}
-
-.preview-canvas {
-  width: 100%;
-  height: 100%;
-  display: block;
-  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
 }
 
 .point-stats {
-  margin: 0;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 0.24rem 0.55rem;
-}
-
-.point-stats div {
-  display: contents;
-}
-
-.point-stats dt,
-.point-stats dd {
+  gap: 4px 8px;
+  font-size: 11px;
   color: var(--muted);
-  font-size: 0.68rem;
 }
 
-.point-stats dd {
+.point-stats strong {
   color: var(--ink);
   font-weight: 750;
   text-align: right;
-  text-transform: capitalize;
 }
 
-.render-point-btn {
+.point-btn {
   width: 100%;
-  min-height: 35px;
-  margin-top: auto;
-  padding: 0.5rem 0.7rem;
+  height: 34px;
+  border: 1px solid #cfe0d4;
+  background: #fff;
   color: var(--green-800);
-  font-size: 0.68rem;
+  border-radius: 8px;
+  font-weight: 750;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.point-btn:hover {
+  background: var(--green-50);
 }
 
 /* Render studio */
@@ -1253,6 +1217,40 @@ tbody tr:hover {
 
 .studio-footer .notice {
   margin-right: auto;
+}
+
+.section {
+  padding: 18px;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.section-title h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.section-title p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.link {
+  font-size: 12px;
+  color: var(--green-700);
+  font-weight: 750;
+  text-decoration: none;
+}
+
+.link:hover {
+  text-decoration: underline;
 }
 
 .legacy-note {
@@ -1549,10 +1547,6 @@ tbody tr:hover {
 }
 
 @media (max-width: 1050px) {
-  #job-status.status.completed .workflow-table tbody {
-    padding-left: 210px;
-  }
-
   .results-overview {
     grid-template-columns: minmax(0, 1.4fr) minmax(290px, 0.8fr);
   }
@@ -1580,23 +1574,6 @@ tbody tr:hover {
 @media (max-width: 860px) {
   main {
     padding: 24px 20px 48px;
-  }
-
-  #job-status.status.completed .status-line {
-    grid-template-columns: 34px 1fr auto;
-  }
-
-  #job-status.status.completed .status-line strong {
-    grid-column: 2;
-  }
-
-  #job-status.status.completed .status-line > span:last-child {
-    grid-column: 3;
-  }
-
-  #job-status.status.completed .workflow-table tbody {
-    margin-top: 0.8rem;
-    padding-left: 0;
   }
 
   .results-overview {
@@ -1677,44 +1654,6 @@ tbody tr:hover {
     flex: 1;
   }
 
-  #job-status.status.completed .workflow-table tbody {
-    grid-auto-flow: row;
-    grid-template-columns: 1fr;
-    gap: 0;
-  }
-
-  #job-status.status.completed .workflow-table tr {
-    min-height: 42px;
-    padding: 0 0 0 42px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    text-align: left;
-  }
-
-  #job-status.status.completed .workflow-table tr:not(:first-child)::before {
-    top: -18px;
-    right: auto;
-    left: 12px;
-    width: 1px;
-    height: 36px;
-  }
-
-  #job-status.status.completed .workflow-table tr::after {
-    top: 8px;
-    left: 12px;
-  }
-
-  #job-status.status.completed .workflow-table td:first-child,
-  #job-status.status.completed .workflow-table td:last-child {
-    margin: 0;
-    text-align: left;
-  }
-
-  .scroll-hint {
-    display: none;
-  }
-
   .studio-grid,
   .advanced-grid {
     grid-template-columns: 1fr;
@@ -1784,14 +1723,6 @@ tbody tr:hover {
     width: 100%;
   }
 
-  #job-status.status.completed .status-line {
-    grid-template-columns: 34px 1fr;
-  }
-
-  #job-status.status.completed .status-line > span:last-child {
-    display: none;
-  }
-
   .summary-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1835,3 +1766,248 @@ tbody tr:hover {
     display: none;
   }
 }
+
+/* =========================================================
+   Analysis status component
+   Keep this section at the end of the stylesheet.
+   ========================================================= */
+
+#job-status.analysis-card {
+    display: grid;
+    grid-template-columns: minmax(260px, .85fr) minmax(0, 1.65fr);
+    align-items: center;
+    gap: 2.5rem;
+
+    width: 100%;
+    min-height: 176px;
+    margin: 1rem 0;
+    padding: 2rem;
+
+    background: #fff;
+    border: 1px solid #e2e8e4;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgb(0 0 0 / 4%);
+}
+
+/* Overall status summary */
+
+#job-status .summary {
+    display: flex;
+    align-items: flex-start;
+    gap: 1.75rem;
+    min-width: 0;
+}
+
+#job-status .summary-icon {
+    display: grid;
+    flex: 0 0 52px;
+    width: 52px;
+    height: 52px;
+    place-items: center;
+
+    border-radius: 50%;
+    background: #19763a;
+    color: #fff;
+}
+
+#job-status .summary-copy {
+    min-width: 0;
+    padding-top: 3px;
+}
+
+#job-status .summary-copy h1 {
+    margin: 0;
+
+    /* Overrides your global h1 rule */
+    font-size: 1.4rem;
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+#job-status .summary-copy p {
+    margin: 1rem 0 0;
+    color: #3d4841;
+    font-size: 1.05rem;
+    line-height: 1.4;
+}
+
+/* Horizontal progress tracker */
+
+#job-status .progress {
+    display: flex;
+    align-items: flex-start;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+}
+
+#job-status .step {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 .35rem;
+    text-align: center;
+}
+
+/* Connector between steps */
+
+#job-status .step:not(:last-child)::after {
+    position: absolute;
+    z-index: 0;
+    top: 18px;
+    left: calc(50% + 29px);
+
+    width: calc(100% - 58px);
+    height: 2px;
+
+    background: #d7dcda;
+    content: "";
+}
+
+/* Stage icon */
+
+#job-status .step-icon {
+    position: relative;
+    z-index: 1;
+
+    display: grid;
+    width: 38px;
+    height: 38px;
+    margin: 0 auto;
+    place-items: center;
+
+    border: 2px solid #cbd5ce;
+    border-radius: 50%;
+    background: #fff;
+    color: #7c8b82;
+}
+
+/*
+ Your HTML puts step-completed on .step-icon, so this selector
+ supports the markup exactly as it currently exists.
+*/
+#job-status .step-icon.step-completed,
+#job-status .step.completed .step-icon {
+    border-color: #19763a;
+    background: #19763a;
+    color: #fff;
+}
+
+/* SVG checkmark */
+
+#job-status .checkmark {
+    width: 22px;
+    height: 22px;
+
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* Stage text */
+
+#job-status .step-title {
+    margin-top: .75rem;
+    color: #171717;
+    font-size: .98rem;
+    font-weight: 700;
+    line-height: 1.3;
+
+    overflow-wrap: anywhere;
+}
+
+#job-status .step-status {
+    margin-top: .3rem;
+    color: #718078;
+    font-size: .92rem;
+    font-weight: 500;
+    line-height: 1.25;
+}
+
+#job-status .step-status-completed,
+#job-status .step.completed .step-status {
+    color: #4da868;
+}
+
+/* Tablet: summary above the tracker */
+
+@media (max-width: 950px) {
+    #job-status.analysis-card {
+        grid-template-columns: 1fr;
+        gap: 2rem;
+    }
+}
+
+/* Mobile: vertical timeline */
+
+@media (max-width: 700px) {
+    #job-status.analysis-card {
+        gap: 1.75rem;
+        padding: 1.4rem;
+    }
+
+    #job-status .summary {
+        gap: 1rem;
+    }
+
+    #job-status .summary-icon {
+        flex-basis: 46px;
+        width: 46px;
+        height: 46px;
+    }
+
+    #job-status .summary-copy h1 {
+        font-size: 1.2rem;
+    }
+
+    #job-status .summary-copy p {
+        margin-top: .5rem;
+        font-size: .95rem;
+    }
+
+    #job-status .progress {
+        flex-direction: column;
+        gap: 1.25rem;
+    }
+
+    #job-status .step {
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        grid-template-rows: auto auto;
+        column-gap: .85rem;
+
+        width: 100%;
+        padding: 0;
+        text-align: left;
+    }
+
+    #job-status .step-icon {
+        grid-column: 1;
+        grid-row: 1 / 3;
+        margin: 0;
+    }
+
+    #job-status .step-title {
+        grid-column: 2;
+        grid-row: 1;
+        align-self: end;
+        margin-top: 0;
+    }
+
+    #job-status .step-status {
+        grid-column: 2;
+        grid-row: 2;
+        margin-top: .15rem;
+    }
+
+    #job-status .step:not(:last-child)::after {
+        top: 38px;
+        left: 18px;
+        width: 2px;
+        height: calc(100% + 1.25rem);
+    }
+}
+
+

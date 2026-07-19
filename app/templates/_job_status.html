@@ -1,14 +1,43 @@
-<section id="job-status" class="card status {{ job.status.value }}">
-  <div class="status-line"><span class="badge">{{ job.status.value }}</span><strong>{{ job.current_stage.replace('_', ' ') }}</strong><span>Global {{ job.progress }}%</span></div>
-  <label class="progress-label" for="global-progress">Overall progress</label>
-  <progress id="global-progress" max="100" value="{{ job.progress }}">{{ job.progress }}%</progress>
-  {% set rows = workflow_rows(job.workflow) %}
-  {% if rows %}
-  <div class="workflow-heading"><div><h2>Workflow</h2><p>Stages run in order. Timing includes model setup and work within each stage.</p></div><span>{{ rows|selectattr('status', 'equalto', 'completed')|list|length }}/{{ rows|length }} complete</span></div>
-  <div class="table-wrap"><table class="workflow-table"><thead><tr><th>Stage</th><th>Status</th><th>Stage progress</th><th>Elapsed</th></tr></thead><tbody>{% for row in rows %}<tr class="workflow-{{ row.status }}"><td><strong>{{ row.label }}</strong>{% if row.option_labels %}<div class="workflow-options">{% for option in row.option_labels %}<span>{{ option }}</span>{% endfor %}</div>{% endif %}</td><td><span class="workflow-state">{{ row.status }}</span></td><td><div class="stage-progress"><progress max="100" value="{{ row.progress }}">{{ row.progress }}%</progress><span>{{ row.progress }}%</span></div></td><td>{{ format_duration(row.duration_seconds) }}</td></tr>{% endfor %}</tbody></table></div>
-  {% else %}
-  <p class="notice">Detailed stage timing is available for jobs created after this update.</p>
-  {% endif %}
-  {% if job.error_message %}<div class="error"><strong>Processing failed</strong><p>{{ job.error_message }}</p></div>{% endif %}
-  {% if job.status.value in ['queued', 'running'] %}<form action="/jobs/{{ job.public_id }}/cancel" method="post"><button class="secondary">Cancel</button></form>{% endif %}
+<section id="job-status" class="analysis-card card">
+  <div class="summary">
+    <div class="summary-icon" aria-hidden="true">
+      {% if job.status.value == 'completed' %}
+      <svg class="checkmark" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10" /></svg>
+      {% else %}
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+      {% endif %}
+    </div>
+    <div class="summary-copy">
+      <h1>{{ job.status.value|capitalize }}</h1>
+      <p>{% if job.error_message %}{{ job.error_message }}{% else %}All stages finished successfully.{% endif %}</p>
+    </div>
+  </div>
+
+  <div class="progress" role="list" aria-label="Analysis stages">
+    {% set rows = workflow_rows(job.workflow) %}
+    {% if rows %}
+      {% for row in rows %}
+      <div class="step" role="listitem">
+        <div class="step-icon step-{{ row.status }}" aria-hidden="true">
+          {% if row.status == 'completed' %}
+          <svg class="checkmark" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10" /></svg>
+          {% elif row.status == 'running' %}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          {% elif row.status == 'failed' %}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+          {% else %}
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/></svg>
+          {% endif %}
+        </div>
+        <div class="step-title">{{ row.label }}</div>
+        <div class="step-status step-status-{{ row.status }}">{{ row.status|capitalize }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <p class="notice">Stage details available once processing begins.</p>
+    {% endif %}
+  </div>
 </section>
+{% if job.status.value in ['queued', 'running'] %}
+<form action="/jobs/{{ job.public_id }}/cancel" method="post" style="margin:-0.5rem 0 1rem;text-align:right"><button class="secondary">Cancel</button></form>
+{% endif %}
