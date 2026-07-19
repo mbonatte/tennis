@@ -100,6 +100,44 @@ def recompute_court_dependent_events(artifact_path: Path, result_path: Path | No
     return artifact
 
 
+def _sampled_court_detection(source, frame_total, scene_cuts, court_stage, chunk_size, progress, cancellation_check):
+    """Use deterministic representative frames, falling back when their court geometry diverges."""
+    sample_count = min(9, frame_total)
+    samples = {round(index * (frame_total - 1) / max(1, sample_count - 1)) for index in range(sample_count)}
+    samples.update(cut for cut in scene_cuts if 0 <= cut < frame_total)
+    sample_frames, sample_indices = [], []
+    for chunk in iter_frame_chunks(source, chunk_size):
+        _cancelled(cancellation_check)
+        for offset, frame in enumerate(chunk.frames):
+            index = chunk.start_frame + offset
+            if index in samples:
+                sample_indices.append(index)
+                sample_frames.append(frame)
+    detected_h, detected_k = court_stage.process_chunk(sample_frames)
+    valid = [(h, k) for h, k in zip(detected_h, detected_k) if h is not None and k is not None]
+    if not valid:
+        raise VideoProcessingError("Court detection failed on every representative frame")
+    arrays = [np.asarray(keypoint, dtype=np.float32).reshape(-1, 2) for _, keypoint in valid]
+    median = np.median(np.stack(arrays), axis=0)
+    diagonal = max(1.0, float(np.hypot(sample_frames[0].shape[0], sample_frames[0].shape[1])))
+    distances = [float(np.mean(np.linalg.norm(array - median, axis=1)) / diagonal) for array in arrays]
+    best = int(np.argmin(distances))
+    # 2% of image diagonal: larger displacement means camera/court geometry changed.
+    if max(distances) <= 0.02:
+        homography, points = valid[best]
+        progress.update("court_detection", frame_total, frame_total, f"Reused stable court calibration from {len(valid)} samples")
+        return [homography] * frame_total, [points] * frame_total
+    logger.warning("Court samples diverged; using per-frame fallback", extra={"court_sample_divergence": max(distances)})
+    homographies, keypoints = [], []
+    for chunk in iter_frame_chunks(source, chunk_size):
+        _cancelled(cancellation_check)
+        chunk_h, chunk_k = court_stage.process_chunk(chunk.frames)
+        homographies.extend(chunk_h)
+        keypoints.extend(chunk_k)
+        progress.update("court_detection", chunk.end_frame, frame_total, "Detected moving court through current frame")
+    return homographies, keypoints
+
+
 def derive_point_scenes(ball_track, bounces: set[int], shots: list[dict], fps: float) -> list[dict]:
     """Derive renderable tennis points from sustained bounce groups in full-video analysis."""
     gap = max(150, int(fps * 5.0))
@@ -464,14 +502,9 @@ def analyze_video(
     if analysis.court_detection:
         court_stage = factories.court(models.court, selected.device)
         try:
-            for chunk in iter_frame_chunks(source, selected.chunk_size):
-                _cancelled(cancellation_check)
-                chunk_homographies, chunk_keypoints = court_stage.process_chunk(chunk.frames)
-                homographies.extend(chunk_homographies)
-                keypoints.extend(chunk_keypoints)
-                progress.update(
-                    "court_detection", chunk.end_frame, frame_total, f"Detected court through frame {chunk.end_frame}"
-                )
+            homographies, keypoints = _sampled_court_detection(
+                source, frame_total, scene_cuts, court_stage, selected.chunk_size, progress, cancellation_check
+            )
         finally:
             _release_stage(court_stage)
         _require_aligned("Court homographies", homographies, frame_total)
