@@ -36,6 +36,7 @@ from tennis_analyzer.pipeline.court_calibration import (
 )
 from tennis_analyzer.pipeline.service import recompute_court_dependent_events
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
+from tennis_analyzer.scoring import PointRecord, score_match
 from tennis_analyzer.video import probe_video, validate_video
 
 router = APIRouter()
@@ -48,6 +49,14 @@ logger = logging.getLogger(__name__)
 class CourtCalibrationPayload(BaseModel):
     frame_index: int = Field(ge=0)
     image_points: list[list[float]]
+
+
+class PointOverridePayload(BaseModel):
+    winner: str | None = None
+    server: str | None = None
+    start_frame: int | None = Field(default=None, ge=0)
+    end_frame: int | None = Field(default=None, ge=0)
+    game_boundary: bool | None = None
 
 
 def _job(db: Session, public_id: str) -> AnalysisJob:
@@ -472,6 +481,38 @@ def _save_visualization_preferences(job: AnalysisJob, visual_options: dict) -> N
     submitted_options = dict(job.submitted_options or {})
     submitted_options["visualization"] = visual_options
     job.submitted_options = submitted_options
+
+
+@router.put("/api/jobs/{public_id}/points/{point_index}")
+def override_point(
+    public_id: str, point_index: int, payload: PointOverridePayload,
+    db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    artifact_path = resolve_job_file(settings.data_root, job.analysis_artifact_relative_path)
+    artifact = read_artifact(artifact_path)
+    scorecard = dict(artifact.get("scorecard") or {})
+    points = list(scorecard.get("points") or [])
+    if point_index < 1 or point_index > len(points):
+        raise HTTPException(404, "Point not found")
+    point = dict(points[point_index - 1])
+    overrides = dict(point.get("user_overrides") or {})
+    for name, value in payload.model_dump(exclude_none=True).items():
+        if name in {"winner", "server"} and value not in {"top_player", "bottom_player", None}:
+            raise HTTPException(422, f"Invalid {name}")
+        overrides[name] = value
+        point[name] = value
+    point["user_overrides"] = overrides
+    records = [PointRecord(**{key: item.get(key) for key in PointRecord.__dataclass_fields__}) for item in [*points[:point_index - 1], point, *points[point_index:]]]
+    updated = score_match(records)
+    artifact["scorecard"] = updated
+    write_artifact(artifact_path, {key: value for key, value in artifact.items() if key != "schema_version"})
+    if job.result_relative_path:
+        result_path = resolve_job_file(settings.data_root, job.result_relative_path)
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+        result["scorecard"], result["points"] = updated, updated["points"]
+        result_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return updated
 
 
 @router.get("/api/jobs/{public_id}/renders/{render_id}")
