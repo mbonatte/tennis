@@ -120,6 +120,8 @@ def test_completed_analysis_can_queue_independent_render(client, sample_video: P
         assert render.visualization_options["player_boxes"] is True
         assert render.visualization_options["top_player_label"] == "Ana"
         assert render.visualization_options["bottom_player_label"] == "Mauricio"
+        assert job.submitted_options["visualization"]["top_player_label"] == "Ana"
+        assert job.submitted_options["visualization"]["bottom_player_label"] == "Mauricio"
 
 
 def test_analysis_with_active_render_cannot_be_deleted(client, sample_video: Path):

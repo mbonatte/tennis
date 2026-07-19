@@ -351,7 +351,9 @@ def create_render(
     job = _job(db, public_id)
     if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
         raise HTTPException(409, "Analysis must finish before rendering")
-    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
+    visual_options = asdict(visual)
+    _save_visualization_preferences(job, visual_options)
+    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=visual_options)
     db.add(render)
     db.flush()
     enqueue_render(render.public_id, settings)
@@ -398,12 +400,21 @@ def create_render_from_form(
         top_player_label=top_player_label,
         bottom_player_label=bottom_player_label,
     )
-    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
+    visual_options = asdict(visual)
+    _save_visualization_preferences(job, visual_options)
+    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=visual_options)
     db.add(render)
     db.flush()
     enqueue_render(render.public_id, settings)
     db.commit()
     return RedirectResponse(f"/jobs/{public_id}", 303)
+
+
+def _save_visualization_preferences(job: AnalysisJob, visual_options: dict) -> None:
+    """Remember the last render controls without changing the completed analysis."""
+    submitted_options = dict(job.submitted_options or {})
+    submitted_options["visualization"] = visual_options
+    job.submitted_options = submitted_options
 
 
 @router.get("/api/jobs/{public_id}/renders/{render_id}")
