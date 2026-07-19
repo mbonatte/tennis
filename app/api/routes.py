@@ -241,6 +241,29 @@ def create_render(public_id: str, visual: VisualizationOptions, db: Session = De
     return {"id": render.public_id, "status": render.status.value}
 
 
+@router.post("/jobs/{public_id}/renders")
+def create_render_from_form(
+    public_id: str,
+    request: Request,
+    ball_trail: bool = Form(False),
+    bounce_markers: bool = Form(False),
+    frame_number: bool = Form(False),
+    court_overlay: bool = Form(False),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    job = _job(db, public_id)
+    if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
+        raise HTTPException(409, "Analysis must finish before rendering")
+    visual = VisualizationOptions(ball_trail=ball_trail, bounce_markers=bounce_markers, frame_number=frame_number, court_overlay=court_overlay)
+    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
+    db.add(render)
+    db.flush()
+    enqueue_render(render.public_id, settings)
+    db.commit()
+    return RedirectResponse(f"/jobs/{public_id}", 303)
+
+
 @router.get("/api/jobs/{public_id}")
 def job_status(public_id: str, db: Session = Depends(get_db)) -> dict:
     return _serialize(_job(db, public_id))
