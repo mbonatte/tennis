@@ -51,7 +51,9 @@ class CourtDetectorNet:
         for index in range(14):
             heatmap = (prediction[index] * 255).astype(np.uint8)
             _, heatmap = cv2.threshold(heatmap, 170, 255, cv2.THRESH_BINARY)
-            circles = cv2.HoughCircles(heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=2, minRadius=10, maxRadius=25)
+            circles = cv2.HoughCircles(
+                heatmap, cv2.HOUGH_GRADIENT, dp=1, minDist=20, param1=50, param2=2, minRadius=10, maxRadius=25
+            )
             if circles is None:
                 points.append(None)
                 continue

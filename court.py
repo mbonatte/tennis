@@ -46,6 +46,7 @@ def track_court(frames, model_path="weights/tennis_court.pt", device_name=None):
     finally:
         tracker.close()
 
+
 def draw_court(
     frames,
     homography_matrices,
@@ -62,9 +63,9 @@ def draw_court(
     frame_height, frame_width = frames[0].shape[:2]
     width_minimap = min(166, max(60, frame_width // 4))
     height_minimap = min(350, max(100, frame_height - 60))
-    
+
     for frame_num, (frame, homography_matrix, kps_court) in enumerate(
-        zip(frames, homography_matrices, kps_courts)
+        zip(frames, homography_matrices, kps_courts, strict=False)
     ):
         img_res = frame.copy()
 
@@ -124,7 +125,7 @@ def draw_court(
         top = max(0, min(30, height - height_minimap))
         right = max(width_minimap, width - 30)
         left = right - width_minimap
-        img_res[top:(top + height_minimap), left:right, :] = minimap
+        img_res[top : (top + height_minimap), left:right, :] = minimap
         output_frames.append(img_res)
     return output_frames
 
@@ -217,6 +218,7 @@ def _player_foot_point(player):
     x1, _, x2, y2 = player.bbox
     return ((x1 + x2) / 2, y2)
 
+
 def draw_keypoints(frames, kps_court):
     output_frames = []
 
@@ -229,24 +231,17 @@ def draw_keypoints(frames, kps_court):
                 y = int(kp[0, 1])
 
                 cv2.circle(img_res, (x, y), radius=8, color=(0, 0, 255), thickness=-1)
-                cv2.putText(
-                    img_res,
-                    str(j),
-                    (x + 10, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 255, 255),
-                    2
-                )
+                cv2.putText(img_res, str(j), (x + 10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
         output_frames.append(img_res)
 
     return output_frames
+
 
 @lru_cache(maxsize=1)
 def get_court_img():
     court_reference = CourtReference()
     court = court_reference.build_court_reference()
     court = cv2.dilate(court, np.ones((10, 10), dtype=np.uint8))
-    court_img = (np.stack((court, court, court), axis=2)*255).astype(np.uint8)
+    court_img = (np.stack((court, court, court), axis=2) * 255).astype(np.uint8)
     return court_img
