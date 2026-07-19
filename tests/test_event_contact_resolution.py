@@ -1,4 +1,9 @@
-from analysis import ShotEvent, _estimate_pre_bounce_serve_hit, resolve_contact_like_bounces
+from analysis import (
+    ShotEvent,
+    _estimate_pre_bounce_serve_hit,
+    refine_bounce_frames,
+    resolve_contact_like_bounces,
+)
 
 
 def test_contact_like_bounce_becomes_shot_when_reversal_reaches_player_box():
@@ -24,3 +29,20 @@ def test_serve_contact_estimate_prefers_a_local_direction_reversal():
     ball = [(0.0, 0.0), (0.0, 10.0), (0.0, 20.0), (0.0, 30.0), (0.0, 25.0), (0.0, 20.0)]
 
     assert _estimate_pre_bounce_serve_hit(ball, bounce_frame=12, fps=30) == 3
+
+
+def test_bounce_before_a_later_player_hit_is_not_suppressed():
+    """A real bounce must survive even when the next hit is only 11 frames later."""
+    shots = [
+        ShotEvent(165, "bottom_player", None, "serve"),
+        ShotEvent(296, "top_player", None, "player_contact_trajectory_recovery"),
+    ]
+
+    bounces = refine_bounce_frames(
+        {238, 283},
+        [(0.0, 0.0)] * 411,
+        shots,
+        fps=30,
+    )
+
+    assert bounces == {238, 283}
