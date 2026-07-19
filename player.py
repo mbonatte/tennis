@@ -106,6 +106,9 @@ class BasePlayerTracker:
         self.model = None
         self.last_top_player = None
         self.last_bottom_player = None
+        self._top_missing_frames = 0
+        self._bottom_missing_frames = 0
+        self.max_missing_frames = 8
         if str(self.device).startswith("cuda"):
             torch.cuda.empty_cache()
 
@@ -169,9 +172,6 @@ class BasePlayerTracker:
         - far-side player is usually in the top half
         - near-side player is usually in the bottom half
         """
-        if not detections:
-            return []
-
         frame_h, _ = frame_shape[:2]
         mid_y = frame_h / 2
 
@@ -186,16 +186,11 @@ class BasePlayerTracker:
             elif cy >= mid_y and self._is_bottom_player_candidate(det, frame_shape):
                 bottom_candidates.append(det)
 
-        top_player = max(top_candidates, key=self._score_detection, default=None)
-        bottom_player = max(bottom_candidates, key=self._score_detection, default=None)
+        top_player = self._select_continuous_candidate(top_candidates, self.last_top_player, frame_shape)
+        bottom_player = self._select_continuous_candidate(bottom_candidates, self.last_bottom_player, frame_shape)
 
-        if top_player is not None:
-            self.last_top_player = top_player
-
-        if bottom_player is not None:
-            self.last_bottom_player = bottom_player
-        else:
-            bottom_player = self.last_bottom_player
+        top_player = self._accept_or_hold("top", top_player)
+        bottom_player = self._accept_or_hold("bottom", bottom_player)
 
         players = []
 
@@ -206,6 +201,49 @@ class BasePlayerTracker:
             players.append(self._make_player("bottom_player", bottom_player))
 
         return players
+
+    def _select_continuous_candidate(self, candidates, previous, frame_shape):
+        """Prefer a plausible continuation over a high-confidence bystander."""
+        if not candidates:
+            return None
+        if previous is None:
+            return max(candidates, key=self._score_detection)
+
+        frame_w = frame_shape[1]
+        previous_width = max(1, previous["bbox"][2] - previous["bbox"][0])
+        max_center_jump = max(frame_w * 0.18, previous_width * 5.0)
+        continuous = []
+        for candidate in candidates:
+            distance = self._center_distance(candidate["center"], previous["center"])
+            if distance > max_center_jump:
+                continue
+            identity_bonus = (
+                0.75
+                if candidate["track_id"] is not None and candidate["track_id"] == previous["track_id"]
+                else 0.0
+            )
+            continuity_bonus = 0.75 * (1.0 - distance / max_center_jump)
+            continuous.append((self._score_detection(candidate) + identity_bonus + continuity_bonus, candidate))
+        return max(continuous, key=lambda item: item[0])[1] if continuous else None
+
+    def _accept_or_hold(self, role, candidate):
+        previous_attribute = f"last_{role}_player"
+        missing_attribute = f"_{role}_missing_frames"
+        if candidate is not None:
+            setattr(self, previous_attribute, candidate)
+            setattr(self, missing_attribute, 0)
+            return candidate
+        missing_frames = getattr(self, missing_attribute) + 1
+        setattr(self, missing_attribute, missing_frames)
+        previous = getattr(self, previous_attribute)
+        if previous is not None and missing_frames <= self.max_missing_frames:
+            return previous
+        setattr(self, previous_attribute, None)
+        return None
+
+    @staticmethod
+    def _center_distance(first, second):
+        return float(np.hypot(first[0] - second[0], first[1] - second[1]))
 
     def _score_detection(self, det):
         """
