@@ -77,6 +77,7 @@ def _serialize_render(render: RenderOutput, job_id: str) -> dict:
         "stage": render.current_stage,
         "progress": render.progress,
         "options": render.visualization_options,
+        "error": render.error_message,
         "video": f"/jobs/{job_id}/renders/{render.public_id}/video" if render.output_relative_path else None,
     }
 

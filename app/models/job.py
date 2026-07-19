@@ -54,7 +54,7 @@ class AnalysisJob(Base):
     pipeline_version: Mapped[str] = mapped_column(String(40), default="0.1.0")
     queue_job_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     cancellation_requested: Mapped[bool] = mapped_column(default=False)
-    renders: Mapped[list["RenderOutput"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
+    renders: Mapped[list[RenderOutput]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
 
 
 class RenderOutput(Base):
@@ -67,5 +67,7 @@ class RenderOutput(Base):
     output_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     progress: Mapped[int] = mapped_column(Integer, default=0)
     current_stage: Mapped[str] = mapped_column(String(80), default="queued")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     analysis: Mapped[AnalysisJob] = relationship(back_populates="renders")

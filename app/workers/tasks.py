@@ -30,6 +30,8 @@ def run_render_job(public_id: str) -> None:
         analysis = render.analysis
         if analysis.status != JobStatus.completed or not analysis.analysis_artifact_relative_path:
             render.status, render.current_stage = JobStatus.failed, "failed"
+            render.error_message = "The saved analysis artifact is unavailable"
+            render.completed_at = datetime.now(UTC)
             db.commit()
             return
         render.status, render.current_stage = JobStatus.running, "rendering"
@@ -52,6 +54,7 @@ def run_render_job(public_id: str) -> None:
             item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
             item.status, item.progress, item.current_stage = JobStatus.completed, 100, "completed"
             item.output_relative_path = str(output.relative_to(settings.data_root.resolve()))
+            item.completed_at = datetime.now(UTC)
             db.commit()
     except Exception:
         logger.exception("Render failed")
@@ -59,6 +62,8 @@ def run_render_job(public_id: str) -> None:
             item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
             if item:
                 item.status, item.current_stage = JobStatus.failed, "failed"
+                item.error_message = "Rendering failed; check the worker logs for details"
+                item.completed_at = datetime.now(UTC)
                 db.commit()
 
 
