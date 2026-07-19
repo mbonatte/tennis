@@ -124,3 +124,16 @@ def test_player_assignment_holds_briefly_then_drops_missing_player():
     assert tracker._assign_top_bottom_players([], shape)[0].center == (500, 250)
     assert tracker._assign_top_bottom_players([], shape)[0].center == (500, 250)
     assert tracker._assign_top_bottom_players([], shape) == []
+
+
+def test_player_assignment_keeps_bottom_identity_when_it_crosses_the_screen_midline():
+    tracker = _uninitialized_box_tracker()
+    shape = (720, 1280, 3)
+    tracker._assign_top_bottom_players([_detection(2, (600, 180)), _detection(1, (540, 420))], shape)
+
+    players = tracker._assign_top_bottom_players([_detection(1, (420, 210), confidence=0.95)], shape)
+
+    by_role = {item.role: item for item in players}
+    assert by_role["bottom_player"].track_id == 1
+    assert by_role["bottom_player"].center == (420, 210)
+    assert by_role["top_player"].track_id == 2

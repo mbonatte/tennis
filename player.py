@@ -184,7 +184,14 @@ class BasePlayerTracker:
         for det in detections:
             _, cy = det["center"]
 
-            if cy < mid_y and self._is_top_player_candidate(det, frame_shape):
+            # Once ByteTrack has established an identity, its player may move
+            # across the image midpoint.  Preserve that identity instead of
+            # reassigning it solely because of a fixed screen-half heuristic.
+            if self._matches_previous_role(det, self.last_top_player):
+                top_candidates.append(det)
+            elif self._matches_previous_role(det, self.last_bottom_player):
+                bottom_candidates.append(det)
+            elif cy < mid_y and self._is_top_player_candidate(det, frame_shape):
                 top_candidates.append(det)
             elif cy >= mid_y and self._is_bottom_player_candidate(det, frame_shape):
                 bottom_candidates.append(det)
@@ -212,9 +219,20 @@ class BasePlayerTracker:
         if previous is None:
             return max(candidates, key=self._score_detection)
 
+        same_identity = [
+            candidate
+            for candidate in candidates
+            if previous["track_id"] is not None and candidate["track_id"] == previous["track_id"]
+        ]
+        if same_identity:
+            return max(same_identity, key=self._score_detection)
+
         frame_w = frame_shape[1]
         previous_width = max(1, previous["bbox"][2] - previous["bbox"][0])
-        max_center_jump = max(frame_w * 0.18, previous_width * 5.0)
+        # A changed tracker ID is a weaker continuity signal than an existing
+        # ID, so use a tighter reacquisition gate.  This prevents the far-side
+        # role from taking the near player when its own detection is lost.
+        max_center_jump = max(frame_w * 0.10, previous_width * 3.0)
         continuous = []
         for candidate in candidates:
             distance = self._center_distance(candidate["center"], previous["center"])
@@ -247,6 +265,15 @@ class BasePlayerTracker:
     @staticmethod
     def _center_distance(first, second):
         return float(np.hypot(first[0] - second[0], first[1] - second[1]))
+
+    @staticmethod
+    def _matches_previous_role(det, previous):
+        return (
+            previous is not None
+            and previous["track_id"] is not None
+            and det["track_id"] is not None
+            and det["track_id"] == previous["track_id"]
+        )
 
     def _score_detection(self, det):
         """
