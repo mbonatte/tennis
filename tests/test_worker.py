@@ -30,7 +30,7 @@ def test_worker_invokes_pipeline_and_records_progress(monkeypatch, sample_video:
 
     def fake_analyze(input_path, output_dir, options, progress, cancelled, model_root):
         output_dir.mkdir(parents=True, exist_ok=True)
-        progress("detecting", 55, "halfway")
+        progress("rendering", 55, "halfway")
         (output_dir / "analyzed.mp4").write_bytes(b"video")
         (output_dir / "result.json").write_text("{}")
         return AnalysisResult(
@@ -47,3 +47,4 @@ def test_worker_invokes_pipeline_and_records_progress(monkeypatch, sample_video:
     with SessionLocal() as db:
         job = db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id))
         assert job.status == JobStatus.completed and job.progress == 100 and job.output_size == 5
+        assert all(stage["status"] == "completed" for stage in job.workflow["stages"])

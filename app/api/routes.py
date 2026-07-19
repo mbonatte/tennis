@@ -4,6 +4,7 @@ import json
 import logging
 import uuid
 from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -21,12 +22,16 @@ from app.models import AnalysisJob, JobStatus
 from app.services.job_state import transition
 from app.services.queue import enqueue_analysis
 from app.services.storage import delete_job_files, resolve_job_file, safe_job_dir, sanitize_filename, stream_upload
+from app.services.workflow import create_workflow, format_duration
+from app.services.workflow import workflow_rows as get_workflow_rows
 from tennis_analyzer.errors import InvalidVideoError
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
 from tennis_analyzer.video import probe_video, validate_video
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
+templates.env.globals["workflow_rows"] = lambda workflow: get_workflow_rows(workflow, datetime.now(UTC))
+templates.env.globals["format_duration"] = format_duration
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +49,7 @@ def _serialize(job: AnalysisJob) -> dict:
         "status": job.status.value,
         "stage": job.current_stage,
         "progress": job.progress,
+        "workflow": get_workflow_rows(job.workflow, datetime.now(UTC)),
         "options": job.submitted_options,
         "video": {
             "duration_seconds": job.video_duration,
@@ -184,6 +190,7 @@ async def create_job(
         input_relative_path=str(input_path.resolve().relative_to(settings.data_root.resolve())),
         input_size=size,
         submitted_options={"analysis": asdict(analysis), "visualization": asdict(visual)},
+        workflow=create_workflow(analysis, visual),
         video_duration=metadata.duration_seconds,
         video_width=metadata.width,
         video_height=metadata.height,

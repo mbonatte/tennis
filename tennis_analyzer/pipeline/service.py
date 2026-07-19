@@ -55,7 +55,8 @@ def _require_models(options: PipelineOptions, models: ModelPaths) -> None:
         raise MissingModelError("Missing required model file(s): " + ", ".join(missing))
 
 
-def _progress_stages(analysis) -> list[WorkStage]:
+def progress_stages(analysis) -> list[WorkStage]:
+    """Return the exact weighted stage plan for the selected analysis options."""
     stages = [WorkStage("scanning", 1)]
     if analysis.ball_tracking:
         stages.append(WorkStage("ball_tracking", 6))
@@ -120,7 +121,7 @@ def analyze_video(
         if progress_callback:
             progress_callback(stage, percent, message)
 
-    progress = WeightedProgress(_progress_stages(selected.analysis), emit)
+    progress = WeightedProgress(progress_stages(selected.analysis), emit)
     logger.info(
         "Starting low-memory analysis",
         extra={

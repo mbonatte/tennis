@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import traceback
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -11,6 +12,7 @@ from app.db.session import SessionLocal
 from app.models import AnalysisJob, JobStatus
 from app.services.job_state import transition
 from app.services.storage import resolve_job_file, safe_job_dir
+from app.services.workflow import create_workflow, finalize_workflow, record_progress
 from tennis_analyzer.errors import AnalysisCancelled, AnalysisError
 from tennis_analyzer.pipeline import analyze_video
 from tennis_analyzer.schemas import AnalysisOptions, PipelineOptions, VisualizationOptions
@@ -27,6 +29,11 @@ def run_analysis_job(public_id: str) -> None:
             if not job or job.status != JobStatus.queued:
                 logger.warning("Job does not exist or is no longer queued")
                 return
+            values = job.submitted_options
+            if not job.workflow:
+                job.workflow = create_workflow(
+                    AnalysisOptions(**values["analysis"]), VisualizationOptions(**values["visualization"])
+                )
             transition(job, JobStatus.running, stage="preparing")
             db.commit()
 
@@ -36,6 +43,7 @@ def run_analysis_job(public_id: str) -> None:
                 if current and current.status == JobStatus.running:
                     current.current_stage = stage
                     current.progress = max(current.progress, min(99, percent))
+                    current.workflow = record_progress(current.workflow, stage, current.progress, datetime.now(UTC))
                     progress_db.commit()
             logger.info("%s", message, extra={"stage": stage, "progress": percent})
 
@@ -67,6 +75,7 @@ def run_analysis_job(public_id: str) -> None:
                 transition(job, JobStatus.cancelled)
             else:
                 transition(job, JobStatus.completed)
+                job.workflow = finalize_workflow(job.workflow, JobStatus.completed.value, datetime.now(UTC))
                 job.output_video_relative_path = str(
                     (output_dir / result.output_video).relative_to(settings.data_root.resolve())
                 )
@@ -93,6 +102,7 @@ def _mark_terminal(public_id: str, status: JobStatus, message: str, diagnostic: 
         if not job or job.status not in {JobStatus.queued, JobStatus.running}:
             return
         transition(job, status)
+        job.workflow = finalize_workflow(job.workflow, status.value, datetime.now(UTC))
         job.error_type = status.value
         job.error_message = message[:2000]
         job.internal_diagnostic = diagnostic

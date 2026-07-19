@@ -34,6 +34,7 @@ class AnalysisJob(Base):
     current_stage: Mapped[str] = mapped_column(String(80), default="uploaded")
     progress: Mapped[int] = mapped_column(Integer, default=0)
     submitted_options: Mapped[dict] = mapped_column(JSON, default=dict)
+    workflow: Mapped[dict] = mapped_column(JSON, default=dict)
     input_relative_path: Mapped[str] = mapped_column(String(500))
     output_video_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     result_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
