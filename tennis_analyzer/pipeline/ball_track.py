@@ -20,6 +20,43 @@ def ball_distances(track: list[BallPoint]) -> list[float]:
     return [-1.0, *[euclidean(current, previous) for previous, current in zip(track, track[1:], strict=False)]]
 
 
+def remove_abrupt_jumps(
+    track: list[BallPoint],
+    *,
+    minimum_jump: float = 70.0,
+    velocity_multiplier: float = 3.0,
+) -> list[BallPoint]:
+    """Remove a one-frame excursion that cannot belong to a continuous track.
+
+    TrackNet may occasionally lock onto a similarly sized object for one frame.
+    A point is rejected only when it is far from both neighbours while those
+    neighbours remain mutually consistent.  The threshold adapts to the local
+    observed ball speed, so a sustained fast rally is not treated as a jump.
+    Missing points are intentionally left for the global interpolation pass.
+    """
+    if len(track) < 3:
+        return track
+
+    distances = [distance for distance in ball_distances(track) if distance >= 0.0 and math.isfinite(distance)]
+    typical_speed = float(np.median(distances)) if distances else 0.0
+    max_excursion = max(minimum_jump, typical_speed * velocity_multiplier)
+
+    for index in range(1, len(track) - 1):
+        previous, current, following = track[index - 1 : index + 2]
+        if any(point[0] is None or point[1] is None for point in (previous, current, following)):
+            continue
+        previous_distance = euclidean(previous, current)
+        following_distance = euclidean(current, following)
+        neighbour_distance = euclidean(previous, following)
+        if (
+            previous_distance > max_excursion
+            and following_distance > max_excursion
+            and neighbour_distance <= max_excursion
+        ):
+            track[index] = (None, None)
+    return track
+
+
 def remove_outliers(track: list[BallPoint], distances: list[float], max_distance: float = 100) -> list[BallPoint]:
     outliers = list(np.where(np.asarray(distances) > max_distance)[0])
     for index in outliers.copy():
@@ -69,7 +106,13 @@ def interpolation(coordinates: list[BallPoint]) -> list[BallPoint]:
 
 def postprocess_ball_track(raw_track: list[BallPoint], *, extrapolation: bool = True) -> list[BallPoint]:
     """Apply continuity-based filtering once, after all raw chunks are joined."""
-    ball_track = list(raw_track)
+    ball_track = [
+        point
+        if point[0] is not None and point[1] is not None and np.isfinite(point[0]) and np.isfinite(point[1])
+        else (None, None)
+        for point in raw_track
+    ]
+    ball_track = remove_abrupt_jumps(ball_track)
     ball_track = remove_outliers(ball_track, ball_distances(ball_track))
     if extrapolation:
         for start, end in split_track(ball_track):

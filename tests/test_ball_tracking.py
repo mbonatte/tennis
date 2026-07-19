@@ -72,6 +72,22 @@ def test_chunked_and_unchunked_global_postprocessing_are_equivalent():
     assert ball.postprocess_ball_track(raw[:4] + raw[4:]) == ball.postprocess_ball_track(raw)
 
 
+def test_global_postprocessing_removes_an_isolated_ball_jump_and_interpolates_it():
+    # The bad detection is deliberately at a former chunk boundary.  The
+    # continuity filter must see points on both sides before interpolation.
+    raw = [(10.0, 10.0), (20.0, 20.0), (30.0, 30.0), (900.0, 100.0), (50.0, 50.0), (60.0, 60.0)]
+
+    processed = ball.postprocess_ball_track(raw)
+
+    assert processed[3] == (40.0, 40.0)
+
+
+def test_global_postprocessing_keeps_consistently_fast_ball_motion():
+    raw = [(float(index * 90), 10.0) for index in range(6)]
+
+    assert ball.postprocess_ball_track(raw) == raw
+
+
 def test_global_postprocessing_normalizes_nonfinite_missing_values():
     raw = [(None, None), (float("nan"), float("nan")), (float("inf"), 2.0)]
 
