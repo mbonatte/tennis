@@ -72,6 +72,7 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
         raise VideoProcessingError("Could not create render output")
     total = 0
     frames_complete = False
+    bounce_history: list[tuple[object, object]] = []
     try:
         for chunk in iter_frame_chunks(source, 128):
             for offset, frame in enumerate(chunk.frames):
@@ -80,17 +81,17 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                     raise VideoProcessingError("Source video has more frames than the analysis artifact")
                 annotated = frame.copy()
                 if visual.ball_trail:
-                    for age in range(7):
-                        point_index = index - age
-                        if point_index < 0:
-                            break
-                        point = ball_track[point_index]
-                        if point[0] is not None and point[1] is not None:
-                            cv2.circle(annotated, (int(point[0]), int(point[1])), 2, (0, 0, 255), max(1, 7 - age))
+                    _draw_ball_trail(annotated, ball_track, index, visual)
                 if visual.court_overlay and index < len(homographies):
                     from court import draw_court_overlay_in_place
 
-                    draw_court_overlay_in_place(annotated, homographies[index], ball_track[index], index in bounces)
+                    draw_court_overlay_in_place(
+                        annotated,
+                        homographies[index],
+                        ball_track[index],
+                        index in bounces,
+                        bounce_history=bounce_history,
+                    )
                 if visual.bounce_markers and index in bounces:
                     point = ball_track[index]
                     if point[0] is not None and point[1] is not None:
@@ -110,12 +111,17 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                         visual.player_poses,
                         visual.top_player_label,
                         visual.bottom_player_label,
+                        visual.bgr_color("player_box_color"),
                     )
                 if visual.statistics_overlay:
                     _draw_saved_summary(annotated, summary)
                 if visual.frame_number:
                     cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 writer.write(annotated)
+                if index in bounces:
+                    bounce_history.append(
+                        (ball_track[index], homographies[index] if index < len(homographies) else None)
+                    )
                 total += 1
             if progress_callback:
                 progress_callback(
@@ -141,7 +147,22 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     return output
 
 
-def _draw_saved_players(frame, players, boxes: bool, poses: bool, top_label: str, bottom_label: str) -> None:
+def _draw_ball_trail(frame, ball_track, index: int, visual) -> None:
+    color = visual.bgr_color("ball_trail_color")
+    for age in range(visual.ball_trail_length):
+        point_index = index - age
+        if point_index < 0:
+            break
+        point = ball_track[point_index]
+        if point[0] is None or point[1] is None:
+            continue
+        radius = max(1, round(visual.ball_trail_size * (visual.ball_trail_length - age) / visual.ball_trail_length))
+        cv2.circle(frame, (int(point[0]), int(point[1])), radius, color, -1)
+
+
+def _draw_saved_players(
+    frame, players, boxes: bool, poses: bool, top_label: str, bottom_label: str, box_color=None
+) -> None:
     skeleton = [
         (5, 7),
         (7, 9),
@@ -158,7 +179,7 @@ def _draw_saved_players(frame, players, boxes: bool, poses: bool, top_label: str
     ]
     for player in players:
         role = player.get("role", "player")
-        color = (255, 80, 40) if role == "top_player" else (40, 200, 80)
+        color = box_color or ((255, 80, 40) if role == "top_player" else (40, 200, 80))
         if boxes and player.get("bbox"):
             x1, y1, x2, y2 = map(int, player["bbox"])
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)

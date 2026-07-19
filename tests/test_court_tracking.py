@@ -55,3 +55,15 @@ def test_court_overlay_draws_in_place_and_reuses_cached_template():
     assert result is frame
     assert court.get_court_img.cache_info().misses == 1
     assert court.get_court_img.cache_info().hits == 1
+
+
+def test_court_overlay_projects_prior_bounces(monkeypatch):
+    calls = []
+    monkeypatch.setattr(court, "_draw_projected_point", lambda *args, **kwargs: calls.append((args, kwargs)))
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    homography = np.eye(3, dtype=np.float32)
+
+    court.draw_court_overlay_in_place(frame, homography, bounce_history=[((12, 18), homography)])
+
+    assert calls[0][0][2] == (12, 18)
+    assert calls[0][1]["thickness"] == -1

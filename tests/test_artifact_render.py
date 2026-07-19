@@ -6,7 +6,7 @@ import pytest
 
 from tennis_analyzer.errors import VideoProcessingError
 from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
-from tennis_analyzer.pipeline.service import _draw_saved_players, render_from_artifact
+from tennis_analyzer.pipeline.service import _draw_ball_trail, _draw_saved_players, render_from_artifact
 from tennis_analyzer.schemas import VisualizationOptions
 
 
@@ -92,3 +92,26 @@ def test_saved_player_boxes_use_render_specific_names(monkeypatch):
     )
 
     assert labels == ["Mauricio"]
+
+
+def test_render_uses_selected_ball_trail_and_player_box_colors(monkeypatch):
+    circles = []
+    rectangles = []
+    monkeypatch.setattr(cv2, "circle", lambda *args, **kwargs: circles.append(args) or args[0])
+    monkeypatch.setattr(cv2, "rectangle", lambda *args, **kwargs: rectangles.append(args) or args[0])
+    frame = np.zeros((80, 80, 3), dtype=np.uint8)
+    visual = VisualizationOptions(ball_trail=True, ball_trail_color="#12ab34", ball_trail_size=5, ball_trail_length=2)
+
+    _draw_ball_trail(frame, [(10, 10), (20, 20)], 1, visual)
+    _draw_saved_players(
+        frame,
+        [{"role": "bottom_player", "bbox": [10, 10, 40, 60]}],
+        boxes=True,
+        poses=False,
+        top_label="Top",
+        bottom_label="Bottom",
+        box_color=visual.bgr_color("ball_trail_color"),
+    )
+
+    assert all(call[3] == (52, 171, 18) for call in circles)
+    assert rectangles[0][3] == (52, 171, 18)

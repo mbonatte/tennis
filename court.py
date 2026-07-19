@@ -130,9 +130,26 @@ def draw_court(
     return output_frames
 
 
-def draw_court_overlay_in_place(frame, homography_matrix, ball_point=None, bounce=False, players=None):
+def draw_court_overlay_in_place(
+    frame,
+    homography_matrix,
+    ball_point=None,
+    bounce=False,
+    players=None,
+    bounce_history=None,
+):
     """Draw only the court minimap onto an already-owned render frame."""
     minimap = get_court_img().copy()
+    for historical_point, historical_homography in bounce_history or []:
+        if historical_homography is not None and _has_point(historical_point):
+            _draw_projected_point(
+                minimap,
+                historical_homography,
+                historical_point,
+                color=(0, 165, 255),
+                radius=20,
+                thickness=-1,
+            )
     if homography_matrix is not None:
         if _has_point(ball_point):
             _draw_projected_point(minimap, homography_matrix, ball_point, color=(0, 255, 255), radius=30)
@@ -194,14 +211,14 @@ def _nearest_valid_point(points, start, step, max_steps):
     return None
 
 
-def _draw_projected_point(image, homography_matrix, point, color, radius, label=None):
+def _draw_projected_point(image, homography_matrix, point, color, radius, label=None, thickness=12):
     point_array = np.array(point, dtype=np.float32).reshape(1, 1, 2)
     projected = cv2.perspectiveTransform(point_array, homography_matrix)
     x = int(projected[0, 0, 0])
     y = int(projected[0, 0, 1])
 
     if 0 <= x < image.shape[1] and 0 <= y < image.shape[0]:
-        cv2.circle(image, (x, y), radius=radius, color=color, thickness=12)
+        cv2.circle(image, (x, y), radius=radius, color=color, thickness=thickness)
         if label:
             cv2.putText(
                 image,

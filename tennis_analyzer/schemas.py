@@ -38,11 +38,15 @@ class AnalysisOptions:
 @dataclass(frozen=True)
 class VisualizationOptions:
     ball_trail: bool = False
+    ball_trail_color: str = "#ff0000"
+    ball_trail_size: int = 3
+    ball_trail_length: int = 7
     bounce_markers: bool = False
     frame_number: bool = True
     court_overlay: bool = False
     court_keypoints: bool = False
     player_boxes: bool = False
+    player_box_color: str = "#28c850"
     player_poses: bool = False
     statistics_overlay: bool = False
     ball_history_plot: bool = False
@@ -56,10 +60,23 @@ class VisualizationOptions:
                 raise OptionValidationError(f"{field_name} must be text")
             if len(value.strip()) > 40 or any(character.isspace() and character != " " for character in value):
                 raise OptionValidationError(f"{field_name} must be at most 40 characters and contain no line breaks")
+        for field_name in ("ball_trail_color", "player_box_color"):
+            value = getattr(self, field_name)
+            if not _is_hex_color(value):
+                raise OptionValidationError(f"{field_name} must be a six-digit hex color such as #ff0000")
+        if not 1 <= self.ball_trail_size <= 30:
+            raise OptionValidationError("ball_trail_size must be between 1 and 30")
+        if not 1 <= self.ball_trail_length <= 240:
+            raise OptionValidationError("ball_trail_length must be between 1 and 240")
 
     def player_box_label(self, role: str) -> str:
         label = self.top_player_label if role == "top_player" else self.bottom_player_label
         return label.strip() or role.replace("_", " ")
+
+    def bgr_color(self, field_name: str) -> tuple[int, int, int]:
+        """Return a browser-style RGB hex setting in OpenCV's BGR order."""
+        value = getattr(self, field_name).lstrip("#")
+        return int(value[4:6], 16), int(value[2:4], 16), int(value[:2], 16)
 
     def validate_for(self, analysis: AnalysisOptions) -> None:
         requirements = {
@@ -75,6 +92,12 @@ class VisualizationOptions:
         invalid = [name for name, available in requirements.items() if getattr(self, name) and not available]
         if invalid:
             raise OptionValidationError("Visualization requires disabled analysis stage(s): " + ", ".join(invalid))
+
+
+def _is_hex_color(value: object) -> bool:
+    if not isinstance(value, str) or len(value) != 7 or not value.startswith("#"):
+        return False
+    return all(character in "0123456789abcdefABCDEF" for character in value[1:])
 
 
 @dataclass(frozen=True)

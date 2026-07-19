@@ -52,6 +52,17 @@ def test_visualization_dependency_validation():
         PipelineOptions(visualization=VisualizationOptions(ball_trail=True)).validated()
 
 
+def test_visualization_color_and_trail_controls_are_validated_and_converted():
+    visual = VisualizationOptions(ball_trail_color="#12ab34", player_box_color="#0011ff", ball_trail_size=5)
+
+    assert visual.bgr_color("ball_trail_color") == (52, 171, 18)
+    assert visual.bgr_color("player_box_color") == (255, 17, 0)
+    with pytest.raises(OptionValidationError, match="hex color"):
+        VisualizationOptions(ball_trail_color="red")
+    with pytest.raises(OptionValidationError, match="trail_length"):
+        VisualizationOptions(ball_trail_length=0)
+
+
 @pytest.mark.parametrize(
     "options",
     [
