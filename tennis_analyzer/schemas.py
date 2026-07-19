@@ -46,6 +46,20 @@ class VisualizationOptions:
     player_poses: bool = False
     statistics_overlay: bool = False
     ball_history_plot: bool = False
+    top_player_label: str = "Top player"
+    bottom_player_label: str = "Bottom player"
+
+    def __post_init__(self) -> None:
+        for field_name in ("top_player_label", "bottom_player_label"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str):
+                raise OptionValidationError(f"{field_name} must be text")
+            if len(value.strip()) > 40 or any(character.isspace() and character != " " for character in value):
+                raise OptionValidationError(f"{field_name} must be at most 40 characters and contain no line breaks")
+
+    def player_box_label(self, role: str) -> str:
+        label = self.top_player_label if role == "top_player" else self.bottom_player_label
+        return label.strip() or role.replace("_", " ")
 
     def validate_for(self, analysis: AnalysisOptions) -> None:
         requirements = {

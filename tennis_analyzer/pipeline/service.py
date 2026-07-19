@@ -96,7 +96,14 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                             annotated, str(number), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1
                         )
                 if index < len(player_tracks) and (visual.player_boxes or visual.player_poses):
-                    _draw_saved_players(annotated, player_tracks[index], visual.player_boxes, visual.player_poses)
+                    _draw_saved_players(
+                        annotated,
+                        player_tracks[index],
+                        visual.player_boxes,
+                        visual.player_poses,
+                        visual.top_player_label,
+                        visual.bottom_player_label,
+                    )
                 if visual.statistics_overlay:
                     _draw_saved_summary(annotated, summary)
                 if visual.frame_number:
@@ -127,7 +134,7 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     return output
 
 
-def _draw_saved_players(frame, players, boxes: bool, poses: bool) -> None:
+def _draw_saved_players(frame, players, boxes: bool, poses: bool, top_label: str, bottom_label: str) -> None:
     skeleton = [
         (5, 7),
         (7, 9),
@@ -143,13 +150,15 @@ def _draw_saved_players(frame, players, boxes: bool, poses: bool) -> None:
         (14, 16),
     ]
     for player in players:
-        color = (255, 80, 40) if player.get("role") == "top_player" else (40, 200, 80)
+        role = player.get("role", "player")
+        color = (255, 80, 40) if role == "top_player" else (40, 200, 80)
         if boxes and player.get("bbox"):
             x1, y1, x2, y2 = map(int, player["bbox"])
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            label = top_label.strip() if role == "top_player" else bottom_label.strip()
             cv2.putText(
                 frame,
-                player.get("role", "player").replace("_player", ""),
+                label or role.replace("_", " "),
                 (x1, max(20, y1 - 6)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.55,

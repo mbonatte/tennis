@@ -1,11 +1,12 @@
 from pathlib import Path
 
 import cv2
+import numpy as np
 import pytest
 
 from tennis_analyzer.errors import VideoProcessingError
 from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
-from tennis_analyzer.pipeline.service import render_from_artifact
+from tennis_analyzer.pipeline.service import _draw_saved_players, render_from_artifact
 from tennis_analyzer.schemas import VisualizationOptions
 
 
@@ -74,3 +75,20 @@ def test_render_removes_partial_video_when_artifact_frame_count_is_wrong(sample_
 
     assert not (destination / ".rendered.mp4").exists()
     assert not (destination / "rendered.mp4").exists()
+
+
+def test_saved_player_boxes_use_render_specific_names(monkeypatch):
+    labels: list[str] = []
+    monkeypatch.setattr(cv2, "putText", lambda frame, text, *args: labels.append(text) or frame)
+    frame = np.zeros((80, 80, 3), dtype=np.uint8)
+
+    _draw_saved_players(
+        frame,
+        [{"role": "bottom_player", "bbox": [10, 10, 40, 60]}],
+        boxes=True,
+        poses=False,
+        top_label="Ana",
+        bottom_label="Mauricio",
+    )
+
+    assert labels == ["Mauricio"]

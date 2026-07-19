@@ -239,6 +239,8 @@ def create_render_from_form(
     player_boxes: bool = Form(False),
     player_poses: bool = Form(False),
     statistics_overlay: bool = Form(False),
+    top_player_label: str = Form("Top player", max_length=40),
+    bottom_player_label: str = Form("Bottom player", max_length=40),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -254,6 +256,8 @@ def create_render_from_form(
         player_boxes=player_boxes,
         player_poses=player_poses,
         statistics_overlay=statistics_overlay,
+        top_player_label=top_player_label,
+        bottom_player_label=bottom_player_label,
     )
     render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
     db.add(render)

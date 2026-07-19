@@ -102,7 +102,12 @@ def test_completed_analysis_can_queue_independent_render(client, sample_video: P
 
     response = client.post(
         f"/jobs/{public_id}/renders",
-        data={"ball_trail": "true", "player_boxes": "true"},
+        data={
+            "ball_trail": "true",
+            "player_boxes": "true",
+            "top_player_label": "Ana",
+            "bottom_player_label": "Mauricio",
+        },
         follow_redirects=False,
     )
 
@@ -112,6 +117,8 @@ def test_completed_analysis_can_queue_independent_render(client, sample_video: P
         assert render.status == JobStatus.queued
         assert render.visualization_options["ball_trail"] is True
         assert render.visualization_options["player_boxes"] is True
+        assert render.visualization_options["top_player_label"] == "Ana"
+        assert render.visualization_options["bottom_player_label"] == "Mauricio"
 
 
 def test_analysis_with_active_render_cannot_be_deleted(client, sample_video: Path):
