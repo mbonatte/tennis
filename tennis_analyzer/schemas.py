@@ -37,6 +37,8 @@ class AnalysisOptions:
 
 @dataclass(frozen=True)
 class VisualizationOptions:
+    scene_start_frame: int | None = None
+    scene_end_frame: int | None = None
     ball_trail: bool = False
     ball_trail_color: str = "#ff0000"
     ball_trail_size: int = 3
@@ -54,6 +56,16 @@ class VisualizationOptions:
     bottom_player_label: str = "Bottom player"
 
     def __post_init__(self) -> None:
+        if self.scene_start_frame is not None and self.scene_start_frame < 0:
+            raise OptionValidationError("scene_start_frame must be non-negative")
+        if self.scene_end_frame is not None and self.scene_end_frame < 0:
+            raise OptionValidationError("scene_end_frame must be non-negative")
+        if (
+            self.scene_start_frame is not None
+            and self.scene_end_frame is not None
+            and self.scene_end_frame < self.scene_start_frame
+        ):
+            raise OptionValidationError("scene_end_frame must not precede scene_start_frame")
         for field_name in ("top_player_label", "bottom_player_label"):
             value = getattr(self, field_name)
             if not isinstance(value, str):

@@ -22,7 +22,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
-from app.services.queue import enqueue_analysis, enqueue_render, enqueue_scene_scan
+from app.services.queue import enqueue_analysis, enqueue_render
 from app.services.storage import delete_job_files, resolve_job_file, safe_job_dir, sanitize_filename, stream_upload
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
@@ -198,7 +198,7 @@ async def create_job(
     db.flush()
     transition(job, JobStatus.queued)
     try:
-        job.queue_job_id = enqueue_scene_scan(public_id, settings)
+        job.queue_job_id = enqueue_analysis(public_id, settings)
         db.commit()
     except Exception as exc:
         logger.exception("Could not enqueue analysis job %s", public_id)
@@ -417,6 +417,8 @@ def create_render(
 @router.post("/jobs/{public_id}/renders")
 def create_render_from_form(
     public_id: str,
+    scene_start_frame: int | None = Form(None, ge=0),
+    scene_end_frame: int | None = Form(None, ge=0),
     ball_trail: bool = Form(False),
     ball_trail_color: str = Form("#ff0000", max_length=7),
     ball_trail_size: int = Form(3, ge=1, le=30),
@@ -438,6 +440,8 @@ def create_render_from_form(
     if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
         raise HTTPException(409, "Analysis must finish before rendering")
     visual = VisualizationOptions(
+        scene_start_frame=scene_start_frame,
+        scene_end_frame=scene_end_frame,
         ball_trail=ball_trail,
         ball_trail_color=ball_trail_color,
         ball_trail_size=ball_trail_size,

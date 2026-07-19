@@ -112,6 +112,10 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     ball_track = artifact["ball_track"]
     if len(ball_track) != expected_frames:
         raise VideoProcessingError("Analysis artifact ball track is not aligned with the source video")
+    start_frame = visual.scene_start_frame or 0
+    end_frame = visual.scene_end_frame if visual.scene_end_frame is not None else expected_frames - 1
+    if start_frame >= expected_frames or end_frame >= expected_frames:
+        raise VideoProcessingError("Selected scene range is outside the analyzed video")
     bounces = set(artifact["bounces"])
     homographies = [
         np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]
@@ -140,6 +144,8 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 index = chunk.start_frame + offset
                 if index >= expected_frames:
                     raise VideoProcessingError("Source video has more frames than the analysis artifact")
+                if index < start_frame or index > end_frame:
+                    continue
                 annotated = frame.copy()
                 if visual.ball_trail:
                     _draw_ball_trail(annotated, ball_track, index, visual)
@@ -187,10 +193,10 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 total += 1
             if progress_callback:
                 progress_callback(
-                    "rendering", min(99, int(total * 100 / max(1, len(ball_track)))), "Rendering saved analysis"
+                    "rendering", min(99, int(total * 100 / max(1, end_frame - start_frame + 1))), "Rendering saved analysis"
                 )
-        if total != expected_frames:
-            raise VideoProcessingError("Source video frame count does not match the analysis artifact")
+        if total != end_frame - start_frame + 1:
+            raise VideoProcessingError("Selected scene frame count does not match the analysis artifact")
         frames_complete = True
     finally:
         writer.release()

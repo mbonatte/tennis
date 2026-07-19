@@ -87,6 +87,9 @@
 (() => {
   const form = document.getElementById("render-options");
   if (!form) return;
+  const range = document.createElement("fieldset");
+  range.innerHTML = '<legend>Scene range</legend><label>Start frame (optional) <input type="number" name="scene_start_frame" min="0"></label><label>End frame (optional) <input type="number" name="scene_end_frame" min="0"></label><p class="notice">Leave blank for the whole video. Example: 0–500 or 1200–1700.</p>';
+  form.querySelector(".columns").prepend(range);
   const key = "tennis-render-options:{{ job.public_id }}";
   const controls = () => [...form.elements].filter((element) => element.name);
   try {
