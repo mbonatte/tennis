@@ -172,6 +172,7 @@ class AnalysisResult:
     summary: dict[str, Any] = field(default_factory=dict)
     scene_cuts: list[int] = field(default_factory=list)
     point_scenes: list[dict[str, Any]] = field(default_factory=list)
+    scorecard: dict[str, Any] = field(default_factory=dict)
     points: list[dict[str, Any]] = field(default_factory=list)
     plots: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)

@@ -21,6 +21,7 @@ from tennis_analyzer.pipeline.court_calibration import calibrated_keypoints, cal
 from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
 from tennis_analyzer.schemas import AnalysisResult, PipelineOptions
+from tennis_analyzer.scoring import PointRecord, score_match
 from tennis_analyzer.video import normalize_video, probe_video
 from tracking_postprocess import stabilize_player_roles
 
@@ -565,6 +566,18 @@ def analyze_video(
             max_ball_speed_kmh=stats_data["max_ball_speed_kmh"],
         )
         point_scenes = derive_point_scenes(ball_track, bounces, shots, metadata.fps)
+        points = [
+            PointRecord(
+                start_frame=scene["start_frame"],
+                end_frame=scene["end_frame"],
+                server=next((event.get("player_role") for event in shots if event["frame"] >= scene["start_frame"] and event.get("player_role") in {"top_player", "bottom_player"}), None),
+                winner=None,
+                confidence=None,
+                reason="winner_unknown",
+            )
+            for scene in point_scenes
+        ]
+        scorecard = score_match(points)
     else:
         bounce_events = [
             {"frame": frame, "classification": "unclassified", "experimental": True} for frame in sorted(bounces)
@@ -591,6 +604,7 @@ def analyze_video(
             "summary": summary,
             "scene_cuts": scene_cuts,
             "point_scenes": point_scenes,
+            "scorecard": scorecard,
         },
     )
 
@@ -610,6 +624,8 @@ def analyze_video(
             summary=summary,
             scene_cuts=scene_cuts,
             point_scenes=point_scenes,
+            points=scorecard["points"],
+            scorecard=scorecard,
             warnings=["Speeds, event classification, and in/out calls are experimental estimates."],
         )
         _save_result(result_path, result)
