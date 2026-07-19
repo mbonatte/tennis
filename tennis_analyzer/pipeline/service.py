@@ -139,6 +139,9 @@ def analyze_video(
     decoded_frames = 0
     for chunk in iter_frame_chunks(source, selected.chunk_size):
         _cancelled(cancellation_check)
+        for frame in chunk.frames:
+            if frame.shape[:2] != (metadata.height, metadata.width):
+                raise VideoProcessingError("Decoded frame dimensions changed during the video")
         if analysis.scene_cut_detection:
             for offset, frame in enumerate(chunk.frames):
                 current = _histogram(frame)
@@ -152,6 +155,10 @@ def analyze_video(
         progress.update("scanning", decoded_frames, estimated_frames, f"Scanned {decoded_frames} frames")
 
     frame_total = decoded_frames
+    if metadata.frame_count is not None and frame_total != metadata.frame_count:
+        raise VideoProcessingError(
+            f"Decoded {frame_total} frames but the video declares {metadata.frame_count}; refusing partial analysis"
+        )
     ball_track: list[tuple[float | None, float | None]]
     if analysis.ball_tracking:
         raw_ball_track = []
@@ -332,7 +339,9 @@ def analyze_video(
 
     if analysis.point_analysis:
         progress.update("point_analysis", 0, 1, "Creating point videos")
-    points = _create_points(source, destination, scene_cuts, metadata, analysis.point_analysis, cancellation_check)
+    points = _create_points(
+        source, destination, scene_cuts, metadata, frame_total, analysis.point_analysis, cancellation_check
+    )
     if analysis.point_analysis:
         progress.update("point_analysis", 1, 1, "Created point videos")
     output_video = destination / "analyzed.mp4"
@@ -348,6 +357,11 @@ def analyze_video(
     if normalized.frame_count is not None and normalized.frame_count != frame_total:
         output_video.unlink(missing_ok=True)
         raise VideoProcessingError("Final video frame count does not match the source")
+    expected_duration = frame_total / metadata.fps
+    duration_tolerance = max(0.1, 1.5 / metadata.fps)
+    if abs(normalized.duration_seconds - expected_duration) > duration_tolerance:
+        output_video.unlink(missing_ok=True)
+        raise VideoProcessingError("Final video duration does not match the decoded source")
     progress.update("normalizing", 1, 1, "Finalized browser-compatible output")
 
     result_path = destination / "result.json"
@@ -368,16 +382,28 @@ def analyze_video(
         warnings=["Speeds, event classification, and in/out calls are experimental estimates."],
     )
     temporary_json = result_path.with_suffix(".tmp")
-    temporary_json.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-    temporary_json.replace(result_path)
+    try:
+        temporary_json.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        temporary_json.replace(result_path)
+    except Exception:
+        temporary_json.unlink(missing_ok=True)
+        raise
     progress.complete()
     return result
 
 
-def _create_points(source: Path, output_dir: Path, cuts: list[int], metadata, enabled: bool, check) -> list[dict]:
+def _create_points(
+    source: Path,
+    output_dir: Path,
+    cuts: list[int],
+    metadata,
+    frame_total: int,
+    enabled: bool,
+    check,
+) -> list[dict]:
     if not enabled:
         return []
-    boundaries = [0, *cuts, metadata.frame_count or int(metadata.duration_seconds * metadata.fps)]
+    boundaries = [0, *cuts, frame_total]
     point_dir = output_dir / "points"
     point_dir.mkdir(exist_ok=True)
     points = []
@@ -408,8 +434,14 @@ def _create_points(source: Path, output_dir: Path, cuts: list[int], metadata, en
             subprocess.run(
                 command, check=True, capture_output=True, timeout=max(60, int((end - start) / metadata.fps * 3))
             )
+            if not temporary.is_file() or temporary.stat().st_size == 0:
+                raise VideoProcessingError("Point video conversion produced no output")
         except (OSError, subprocess.SubprocessError) as exc:
+            temporary.unlink(missing_ok=True)
             raise VideoProcessingError("Could not create point video") from exc
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
         final = point_dir / name
         temporary.replace(final)
         points.append(

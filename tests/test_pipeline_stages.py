@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
+from tennis_analyzer.errors import VideoProcessingError
 from tennis_analyzer.pipeline import analyze_video
+from tennis_analyzer.pipeline.chunks import FrameChunk
 from tennis_analyzer.pipeline.stages import StageFactories
 from tennis_analyzer.schemas import AnalysisOptions, PipelineOptions
 
@@ -151,3 +153,19 @@ def test_video_writer_is_released_and_partial_output_removed_on_render_failure(m
 
     assert writer.released
     assert not (output / ".annotated.mp4").exists()
+
+
+def test_pipeline_rejects_partial_decode_before_loading_models(monkeypatch, sample_video, tmp_path):
+    import cv2
+
+    capture = cv2.VideoCapture(str(sample_video))
+    ok, frame = capture.read()
+    capture.release()
+    assert ok
+    monkeypatch.setattr(
+        "tennis_analyzer.pipeline.service.iter_frame_chunks",
+        lambda source, size: iter([FrameChunk(0, [frame])]),
+    )
+
+    with pytest.raises(VideoProcessingError, match="declares 10"):
+        analyze_video(sample_video, tmp_path / "output", PipelineOptions(chunk_size=4))

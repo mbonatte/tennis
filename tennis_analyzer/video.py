@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,8 @@ def probe_video(path: Path, *, timeout: int = 30, allowed_codecs: set[str] | Non
     rate = str(video.get("avg_frame_rate") or video.get("r_frame_rate") or "0/1")
     numerator, denominator = (float(part) for part in rate.split("/", 1))
     fps = numerator / denominator if denominator else 0.0
+    if not math.isfinite(fps) or fps <= 0:
+        raise InvalidVideoError("The video frame rate could not be determined")
     duration = float(video.get("duration") or data.get("format", {}).get("duration") or 0)
     frames = video.get("nb_frames")
     return VideoMetadata(
@@ -90,5 +93,11 @@ def normalize_video(raw_video: Path, source_video: Path, destination: Path, *, t
         "-shortest",
         str(temporary),
     ]
-    _run(command, timeout)
-    temporary.replace(destination)
+    try:
+        _run(command, timeout)
+        if not temporary.is_file() or temporary.stat().st_size == 0:
+            raise VideoProcessingError("Video conversion produced no output")
+        temporary.replace(destination)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
