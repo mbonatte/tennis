@@ -48,9 +48,13 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     homographies = [
         np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]
     ]
+    keypoints = artifact.get("court_keypoints", [])
+    player_tracks = artifact.get("player_tracks", [])
+    summary = artifact.get("summary", {})
+    raw_output = destination / ".rendered.mp4"
     output = destination / "rendered.mp4"
     writer = cv2.VideoWriter(
-        str(output), cv2.VideoWriter_fourcc(*"mp4v"), metadata.fps, (metadata.width, metadata.height)
+        str(raw_output), cv2.VideoWriter_fourcc(*"mp4v"), metadata.fps, (metadata.width, metadata.height)
     )
     if not writer.isOpened():
         raise VideoProcessingError("Could not create render output")
@@ -72,6 +76,21 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                     from court import draw_court_overlay_in_place
 
                     draw_court_overlay_in_place(annotated, homographies[index], ball_track[index], index in bounces)
+                if visual.bounce_markers and index in bounces:
+                    point = ball_track[index]
+                    if point[0] is not None and point[1] is not None:
+                        cv2.circle(annotated, (int(point[0]), int(point[1])), 14, (0, 165, 255), 3)
+                if visual.court_keypoints and index < len(keypoints) and keypoints[index] is not None:
+                    for number, point in enumerate(keypoints[index]):
+                        x, y = int(point[0][0]), int(point[0][1])
+                        cv2.circle(annotated, (x, y), 5, (0, 0, 255), -1)
+                        cv2.putText(
+                            annotated, str(number), (x + 5, y - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1
+                        )
+                if index < len(player_tracks) and (visual.player_boxes or visual.player_poses):
+                    _draw_saved_players(annotated, player_tracks[index], visual.player_boxes, visual.player_poses)
+                if visual.statistics_overlay:
+                    _draw_saved_summary(annotated, summary)
                 if visual.frame_number:
                     cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 writer.write(annotated)
@@ -82,9 +101,68 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 )
     finally:
         writer.release()
+    try:
+        normalize_video(raw_output, source, output, timeout=max(120, int(metadata.duration_seconds * 5)))
+    finally:
+        raw_output.unlink(missing_ok=True)
+    rendered = probe_video(output)
+    if (rendered.width, rendered.height) != (metadata.width, metadata.height):
+        output.unlink(missing_ok=True)
+        raise VideoProcessingError("Rendered video dimensions do not match the source")
     if progress_callback:
         progress_callback("completed", 100, "Render completed")
     return output
+
+
+def _draw_saved_players(frame, players, boxes: bool, poses: bool) -> None:
+    skeleton = [
+        (5, 7),
+        (7, 9),
+        (6, 8),
+        (8, 10),
+        (5, 6),
+        (5, 11),
+        (6, 12),
+        (11, 12),
+        (11, 13),
+        (13, 15),
+        (12, 14),
+        (14, 16),
+    ]
+    for player in players:
+        color = (255, 80, 40) if player.get("role") == "top_player" else (40, 200, 80)
+        if boxes and player.get("bbox"):
+            x1, y1, x2, y2 = map(int, player["bbox"])
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(
+                frame,
+                player.get("role", "player").replace("_player", ""),
+                (x1, max(20, y1 - 6)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                color,
+                2,
+            )
+        points, confidences = player.get("keypoints_xy"), player.get("keypoints_conf")
+        if poses and points:
+            for first, second in skeleton:
+                if confidences and (confidences[first] < 0.25 or confidences[second] < 0.25):
+                    continue
+                a, b = points[first], points[second]
+                cv2.line(frame, tuple(map(int, a)), tuple(map(int, b)), color, 2)
+
+
+def _draw_saved_summary(frame, summary) -> None:
+    lines = [
+        f"Shots: {summary.get('shot_count', 0)}",
+        f"Bounces: {summary.get('bounce_count', 0)}",
+        f"Max ball speed: {summary.get('max_ball_speed_kmh') or 0:.1f} km/h",
+    ]
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (10, 45), (330, 135), (20, 20, 20), -1)
+    cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+    for index, line in enumerate(lines):
+        cv2.putText(frame, line, (22, 72 + index * 25), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
 
 
 def _histogram(frame: np.ndarray) -> np.ndarray:
