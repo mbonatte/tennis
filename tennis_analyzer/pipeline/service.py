@@ -22,6 +22,7 @@ from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
 from tennis_analyzer.schemas import AnalysisResult, PipelineOptions
 from tennis_analyzer.video import normalize_video, probe_video
+from tracking_postprocess import stabilize_player_roles
 
 ProgressCallback = Callable[[str, int, str], None]
 CancellationCheck = Callable[[], bool]
@@ -383,6 +384,7 @@ def analyze_video(
         finally:
             _release_stage(player_stage)
         _require_aligned("Player tracking", player_tracks, frame_total)
+        player_tracks = stabilize_player_roles(player_tracks, (metadata.height, metadata.width))
 
     _cancelled(cancellation_check)
     bounces: set[int] = set()
