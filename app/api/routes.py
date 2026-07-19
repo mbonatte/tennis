@@ -226,7 +226,9 @@ async def create_job(
 @router.get("/jobs/{public_id}", response_class=HTMLResponse)
 def job_page(public_id: str, request: Request, db: Session = Depends(get_db)):
     job = _job(db, public_id)
-    result = _load_result(job, get_settings()) if job.status == JobStatus.completed and job.result_relative_path else None
+    result = (
+        _load_result(job, get_settings()) if job.status == JobStatus.completed and job.result_relative_path else None
+    )
     return templates.TemplateResponse(request, "job.html", {"job": job, "result": result})
 
 
@@ -263,8 +265,11 @@ def analyze_selected_scenes(
                 "visualization": visual_options,
                 "scene_source": {"parent_id": parent.public_id, **scene},
             },
-            workflow=create_workflow(AnalysisOptions(**analysis_options), VisualizationOptions(**visual_options), include_render=False),
-            video_duration=(scene["end_frame"] - scene["start_frame"] + 1) / max(1, parent.video_duration and (review["frame_count"] / parent.video_duration)),
+            workflow=create_workflow(
+                AnalysisOptions(**analysis_options), VisualizationOptions(**visual_options), include_render=False
+            ),
+            video_duration=(scene["end_frame"] - scene["start_frame"] + 1)
+            / max(1, parent.video_duration and (review["frame_count"] / parent.video_duration)),
             video_width=parent.video_width,
             video_height=parent.video_height,
             video_codec=parent.video_codec,
@@ -487,8 +492,11 @@ def _save_visualization_preferences(job: AnalysisJob, visual_options: dict) -> N
 
 @router.put("/api/jobs/{public_id}/points/{point_index}")
 def override_point(
-    public_id: str, point_index: int, payload: PointOverridePayload,
-    db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+    public_id: str,
+    point_index: int,
+    payload: PointOverridePayload,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
 ) -> dict:
     job = _calibratable_job(db, public_id)
     artifact_path = resolve_job_file(settings.data_root, job.analysis_artifact_relative_path)
@@ -505,7 +513,10 @@ def override_point(
         overrides[name] = value
         point[name] = value
     point["user_overrides"] = overrides
-    records = [PointRecord(**{key: item.get(key) for key in PointRecord.__dataclass_fields__}) for item in [*points[:point_index - 1], point, *points[point_index:]]]
+    records = [
+        PointRecord(**{key: item.get(key) for key in PointRecord.__dataclass_fields__})
+        for item in [*points[: point_index - 1], point, *points[point_index:]]
+    ]
     updated = score_match(records)
     artifact["scorecard"] = updated
     write_artifact(artifact_path, {key: value for key, value in artifact.items() if key != "schema_version"})

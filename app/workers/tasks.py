@@ -42,7 +42,9 @@ def run_scene_scan_job(public_id: str) -> None:
             ok, frame = capture.read()
             if not ok:
                 break
-            histogram = cv2.normalize(cv2.calcHist([cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)], [0, 1], None, [32, 32], [0, 180, 0, 256]), None)
+            histogram = cv2.normalize(
+                cv2.calcHist([cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)], [0, 1], None, [32, 32], [0, 180, 0, 256]), None
+            )
             if previous is not None and cv2.compareHist(previous, histogram, cv2.HISTCMP_BHATTACHARYYA) >= 0.55:
                 cuts.append(frame_num)
             previous = histogram

@@ -22,13 +22,17 @@ def enqueue_scene_scan(public_id: str, settings: Settings) -> str:
     from redis import Redis
     from rq import Queue
 
-    return Queue("analysis", connection=Redis.from_url(settings.redis_url), default_timeout=settings.job_timeout_seconds).enqueue(
-        "app.workers.tasks.run_scene_scan_job",
-        public_id,
-        job_timeout=settings.job_timeout_seconds,
-        result_ttl=86400,
-        failure_ttl=604800,
-    ).id
+    return (
+        Queue("analysis", connection=Redis.from_url(settings.redis_url), default_timeout=settings.job_timeout_seconds)
+        .enqueue(
+            "app.workers.tasks.run_scene_scan_job",
+            public_id,
+            job_timeout=settings.job_timeout_seconds,
+            result_ttl=86400,
+            failure_ttl=604800,
+        )
+        .id
+    )
 
 
 def enqueue_render(public_id: str, settings: Settings) -> str:
