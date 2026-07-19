@@ -1,6 +1,5 @@
-from pathlib import Path
-
 import tomllib
+from pathlib import Path
 
 
 def test_wheel_configuration_includes_runtime_model_adapters():
