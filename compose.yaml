@@ -29,6 +29,9 @@ services:
       migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
     volumes: [job-data:/app/data, ./models:/app/models:ro]
+    # The worker is an RQ process, not an HTTP server. Its container exits if
+    # that process dies; ping Redis to verify its only external dependency.
+    healthcheck: {test: ["CMD", "python", "-c", "from redis import Redis; Redis(host='redis', port=6379, db=0, socket_connect_timeout=3).ping()"], interval: 30s, timeout: 5s, retries: 3}
     deploy: {replicas: 1}
   postgres:
     image: postgres:17.2-alpine
