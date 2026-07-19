@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import logging
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
+
+
+def _loaded(stage_name: str, started: float, stage):
+    logger.info(
+        "Loaded job-scoped model stage",
+        extra={"model_stage": stage_name, "model_load_seconds": round(time.perf_counter() - started, 3)},
+    )
+    return stage
 
 
 class ChunkStage(Protocol):
@@ -37,18 +49,21 @@ class PlayerStage:
 def create_ball_stage(model_path: Path, device: str, batch_size: int):
     from ball import BallTracker
 
-    return BallTracker.from_checkpoint(model_path, device, batch_size=batch_size)
+    started = time.perf_counter()
+    return _loaded("ball", started, BallTracker.from_checkpoint(model_path, device, batch_size=batch_size))
 
 
 def create_court_stage(model_path: Path, device: str):
     from court import CourtTracker
 
-    return CourtTracker.from_checkpoint(model_path, device)
+    started = time.perf_counter()
+    return _loaded("court", started, CourtTracker.from_checkpoint(model_path, device))
 
 
 def create_player_stage(box_path: Path, pose_path: Path, device: str, pose_enabled: bool):
     from player import BoxPlayerTracker, HybridPlayerTracker
 
+    started = time.perf_counter()
     if pose_enabled:
         tracker = HybridPlayerTracker(
             box_model_path=str(box_path),
@@ -59,13 +74,14 @@ def create_player_stage(box_path: Path, pose_path: Path, device: str, pose_enabl
         )
     else:
         tracker = BoxPlayerTracker(model_path=str(box_path), conf=0.5, device=device)
-    return PlayerStage(tracker)
+    return _loaded("player_pose" if pose_enabled else "player", started, PlayerStage(tracker))
 
 
 def create_bounce_detector(model_path: Path):
     from bounce_detector import BounceDetector
 
-    return BounceDetector(str(model_path))
+    started = time.perf_counter()
+    return _loaded("bounce", started, BounceDetector(str(model_path)))
 
 
 @dataclass(frozen=True)
