@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     allowed_video_codecs: list[str] = Field(
         default_factory=lambda: ["h264", "hevc", "mpeg4", "vp8", "vp9", "av1", "mjpeg"]
     )
-    job_timeout_seconds: int = 7200
+    job_timeout_seconds: int = 86400
     worker_concurrency: int = 1
     retention_days: int = 30
     log_level: str = "INFO"

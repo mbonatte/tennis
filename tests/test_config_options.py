@@ -20,6 +20,7 @@ def test_constrained_cpu_defaults_are_bounded():
     assert settings.analysis_chunk_frames == options.chunk_size == 128
     assert settings.analysis_ball_batch_size == options.ball_batch_size == 4
     assert (settings.max_video_width, settings.max_video_height) == (1920, 1080)
+    assert settings.job_timeout_seconds == 86400
 
 
 def test_settings_build_database_url_from_single_password():
