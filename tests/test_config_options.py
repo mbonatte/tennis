@@ -12,6 +12,16 @@ def test_settings_parse_hosts_and_positive_limits(tmp_path):
         Settings(worker_concurrency=0)
 
 
+def test_constrained_cpu_defaults_are_bounded():
+    settings = Settings(_env_file=None)
+    options = PipelineOptions().validated()
+
+    assert settings.analysis_execution_mode == "low_memory"
+    assert settings.analysis_chunk_frames == options.chunk_size == 128
+    assert settings.analysis_ball_batch_size == options.ball_batch_size == 4
+    assert (settings.max_video_width, settings.max_video_height) == (1920, 1080)
+
+
 def test_settings_build_database_url_from_single_password():
     settings = Settings(_env_file=None, database_url="", postgres_password="p@ss: /word")
     from sqlalchemy.engine import make_url
@@ -39,3 +49,18 @@ def test_analysis_dependencies_are_enabled():
 def test_visualization_dependency_validation():
     with pytest.raises(OptionValidationError):
         PipelineOptions(visualization=VisualizationOptions(ball_trail=True)).validated()
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        PipelineOptions(chunk_size=0),
+        PipelineOptions(chunk_size=4, ball_batch_size=5),
+        PipelineOptions(ball_batch_size=0),
+        PipelineOptions(device="metal"),
+        PipelineOptions(execution_mode="single_pass"),
+    ],
+)
+def test_invalid_pipeline_execution_settings_are_rejected(options):
+    with pytest.raises(OptionValidationError):
+        options.validated()

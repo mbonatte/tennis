@@ -67,17 +67,30 @@ class VisualizationOptions:
 class PipelineOptions:
     analysis: AnalysisOptions = field(default_factory=AnalysisOptions)
     visualization: VisualizationOptions = field(default_factory=VisualizationOptions)
-    chunk_size: int = 256
+    chunk_size: int = 128
+    ball_batch_size: int = 4
     device: str = "cpu"
+    execution_mode: str = "low_memory"
 
     def validated(self) -> PipelineOptions:
-        if not 16 <= self.chunk_size <= 2048:
-            raise OptionValidationError("chunk_size must be between 16 and 2048")
+        if not 1 <= self.chunk_size <= 2048:
+            raise OptionValidationError("chunk_size must be between 1 and 2048")
+        if not 1 <= self.ball_batch_size <= self.chunk_size:
+            raise OptionValidationError("ball_batch_size must be between 1 and chunk_size")
         analysis = self.analysis.validated()
         self.visualization.validate_for(analysis)
         if self.device != "cpu" and self.device != "cuda" and not self.device.startswith("cuda:"):
             raise OptionValidationError("device must be cpu, cuda, or cuda:<index>")
-        return PipelineOptions(analysis, self.visualization, self.chunk_size, self.device)
+        if self.execution_mode != "low_memory":
+            raise OptionValidationError("execution_mode must be low_memory")
+        return PipelineOptions(
+            analysis,
+            self.visualization,
+            self.chunk_size,
+            self.ball_batch_size,
+            self.device,
+            self.execution_mode,
+        )
 
 
 @dataclass(frozen=True)

@@ -52,7 +52,9 @@ def run_analysis_job(public_id: str) -> None:
                 analysis=AnalysisOptions(**values["analysis"]),
                 visualization=VisualizationOptions(**values["visualization"]),
                 chunk_size=settings.analysis_chunk_frames,
+                ball_batch_size=settings.analysis_ball_batch_size,
                 device=settings.device,
+                execution_mode=settings.analysis_execution_mode,
             )
             input_path = resolve_job_file(settings.data_root, job.input_relative_path)
             output_dir = safe_job_dir(settings.data_root, public_id) / "output"

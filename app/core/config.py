@@ -25,8 +25,8 @@ class Settings(BaseSettings):
     model_root: Path = Path("models")
     max_upload_bytes: int = 2 * 1024 * 1024 * 1024
     max_video_duration_seconds: int = 3600
-    max_video_width: int = 3840
-    max_video_height: int = 2160
+    max_video_width: int = 1920
+    max_video_height: int = 1080
     allowed_video_extensions: list[str] = Field(
         default_factory=lambda: [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"]
     )
@@ -41,7 +41,9 @@ class Settings(BaseSettings):
     allowed_hosts: list[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1", "testserver"])
     public_base_url: str = "http://localhost:8000"
     upload_chunk_bytes: int = 1024 * 1024
-    analysis_chunk_frames: int = 256
+    analysis_chunk_frames: int = 128
+    analysis_ball_batch_size: int = 4
+    analysis_execution_mode: str = "low_memory"
 
     @field_validator("allowed_hosts", "allowed_video_extensions", "allowed_video_codecs", mode="before")
     @classmethod
@@ -50,12 +52,28 @@ class Settings(BaseSettings):
             return [part.strip() for part in value.split(",") if part.strip()]
         return value
 
-    @field_validator("max_upload_bytes", "job_timeout_seconds", "worker_concurrency")
+    @field_validator(
+        "max_upload_bytes",
+        "job_timeout_seconds",
+        "worker_concurrency",
+        "analysis_chunk_frames",
+        "analysis_ball_batch_size",
+    )
     @classmethod
     def positive(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("must be positive")
         return value
+
+    @model_validator(mode="after")
+    def validate_analysis_execution(self):
+        if self.analysis_chunk_frames > 2048:
+            raise ValueError("ANALYSIS_CHUNK_FRAMES cannot exceed 2048")
+        if self.analysis_ball_batch_size > self.analysis_chunk_frames:
+            raise ValueError("ANALYSIS_BALL_BATCH_SIZE cannot exceed ANALYSIS_CHUNK_FRAMES")
+        if self.analysis_execution_mode != "low_memory":
+            raise ValueError("ANALYSIS_EXECUTION_MODE must be low_memory")
+        return self
 
     @model_validator(mode="after")
     def resolve_database_url(self):
