@@ -88,7 +88,9 @@
   const form = document.getElementById("render-options");
   if (!form) return;
   const range = document.createElement("fieldset");
-  range.innerHTML = '<legend>Scene range</legend><label>Start frame (optional) <input type="number" name="scene_start_frame" min="0"></label><label>End frame (optional) <input type="number" name="scene_end_frame" min="0"></label><p class="notice">Leave blank for the whole video. Example: 0–500 or 1200–1700.</p>';
+  const points = {{ result.point_scenes|default([])|tojson }};
+  range.innerHTML = '<legend>Point scene</legend><label>Render <select name="point_scene"><option value="">Whole video</option>' + points.map((point) => `<option value="${point.start_frame}:${point.end_frame}">${point.id.replace("-", " ")}</option>`).join("") + '</select></label><input type="hidden" name="scene_start_frame"><input type="hidden" name="scene_end_frame">';
+  range.querySelector("select").addEventListener("change", (event) => { const [start, end] = event.target.value.split(":"); range.querySelector('[name="scene_start_frame"]').value = start || ""; range.querySelector('[name="scene_end_frame"]').value = end || ""; save(); });
   form.querySelector(".columns").prepend(range);
   const key = "tennis-render-options:{{ job.public_id }}";
   const controls = () => [...form.elements].filter((element) => element.name);

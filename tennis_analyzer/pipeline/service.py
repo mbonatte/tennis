@@ -100,6 +100,28 @@ def recompute_court_dependent_events(artifact_path: Path, result_path: Path | No
     return artifact
 
 
+def derive_point_scenes(ball_track, bounces: set[int], shots: list[dict], fps: float) -> list[dict]:
+    """Derive renderable tennis points from sustained bounce groups in full-video analysis."""
+    gap = max(90, int(fps * 3.0))
+    groups: list[list[int]] = []
+    for bounce in sorted(bounces):
+        if not groups or bounce - groups[-1][-1] > gap:
+            groups.append([bounce])
+        else:
+            groups[-1].append(bounce)
+    scenes = []
+    for group in groups:
+        if len(group) < 3:
+            continue
+        start = max(0, group[0] - int(fps * 3.3))
+        if not scenes and start < int(fps * 4):
+            start = 0
+        last_event = max([group[-1], *[event["frame"] for event in shots if group[-1] <= event.get("frame", -1) <= group[-1] + int(fps * 3.5)]])
+        end = min(len(ball_track) - 1, last_event + int(fps * 3.3))
+        scenes.append({"id": f"point-{len(scenes) + 1}", "start_frame": start, "end_frame": end, "selected": True})
+    return scenes
+
+
 def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None, court_calibration=None):
     """Render annotations without loading any analysis model."""
     artifact = read_artifact(Path(artifact_path))
@@ -486,6 +508,7 @@ def analyze_video(
     bounce_events: list[dict] = []
     player_statistics: dict = {}
     summary: dict = {"frames_processed": len(ball_track), "scene_count": len(scene_cuts) + 1}
+    point_scenes: list[dict] = []
     if analysis.statistics:
         from analysis import compute_match_stats
 
@@ -508,6 +531,7 @@ def analyze_video(
             average_ball_speed_kmh=stats_data["average_ball_speed_kmh"],
             max_ball_speed_kmh=stats_data["max_ball_speed_kmh"],
         )
+        point_scenes = derive_point_scenes(ball_track, bounces, shots, metadata.fps)
     else:
         bounce_events = [
             {"frame": frame, "classification": "unclassified", "experimental": True} for frame in sorted(bounces)
@@ -533,6 +557,7 @@ def analyze_video(
             "player_statistics": player_statistics,
             "summary": summary,
             "scene_cuts": scene_cuts,
+            "point_scenes": point_scenes,
         },
     )
 
@@ -551,6 +576,7 @@ def analyze_video(
             player_statistics=player_statistics,
             summary=summary,
             scene_cuts=scene_cuts,
+            point_scenes=point_scenes,
             warnings=["Speeds, event classification, and in/out calls are experimental estimates."],
         )
         _save_result(result_path, result)
