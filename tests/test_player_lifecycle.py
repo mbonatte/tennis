@@ -71,3 +71,13 @@ def test_pose_models_are_not_loaded_when_pose_stage_is_disabled(monkeypatch):
     player.BoxPlayerTracker("players.pt", device="cpu")
 
     assert [instance.path for instance in FakeYolo.instances] == ["players.pt"]
+
+
+def test_hybrid_tracker_reads_each_selected_checkpoint_once(monkeypatch):
+    FakeYolo.instances.clear()
+    monkeypatch.setattr(player, "YOLO", FakeYolo)
+
+    tracker = player.HybridPlayerTracker("players.pt", "pose.pt", device="cpu")
+
+    assert [instance.path for instance in FakeYolo.instances] == ["players.pt", "pose.pt"]
+    assert tracker.recovery_model is not tracker.model

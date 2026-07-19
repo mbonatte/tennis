@@ -1,3 +1,4 @@
+import copy
 from dataclasses import dataclass
 from typing import Optional, Tuple, List
 
@@ -620,9 +621,10 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.pose_model.overrides["verbose"] = False
         self.pose_model.to(device)
         self.pose_model.model.eval()
-        self.recovery_model = YOLO(box_model_path)
+        # Recovery needs an independent predictor so ROI inference cannot reset
+        # ByteTrack state, but it does not need to read the checkpoint twice.
+        self.recovery_model = copy.deepcopy(self.model)
         self.recovery_model.overrides["verbose"] = False
-        self.recovery_model.to(device)
         self.recovery_model.model.eval()
 
         self.pose_conf = pose_conf
