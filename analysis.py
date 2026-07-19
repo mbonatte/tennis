@@ -827,7 +827,15 @@ def resolve_contact_like_bounces(
         candidates = [event for event in refined_shots if 0 < event.frame - bounce_frame <= max_candidate_gap]
         if not candidates:
             continue
-        contact = _nearest_player_box_contact(ball_positions, player_tracks, bounce_frame, fps)
+        # Only a contact at the bounce instant can overturn a learned bounce.
+        # A later player contact is the next shot in the rally and must remain
+        # separate (for example, bounce 283 followed by a top-player hit 294).
+        contact = _nearest_player_box_contact_in_window(
+            ball_positions,
+            player_tracks,
+            bounce_frame,
+            bounce_frame + max(2, int(fps * 0.10)),
+        )
         if contact is None:
             continue
         contact_frame, role = contact
