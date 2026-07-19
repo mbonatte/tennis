@@ -49,7 +49,23 @@ dev = [
 tennis-analyze = "tennis_analyzer.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["app", "tennis_analyzer"]
+packages = [
+  "app",
+  "tennis_analyzer",
+  "BallTrack",
+  "analysis.py",
+  "ball.py",
+  "bounce_detector.py",
+  "court.py",
+  "court_detection_net.py",
+  "court_reference.py",
+  "homography.py",
+  "main.py",
+  "player.py",
+  "postprocess.py",
+  "tracking_postprocess.py",
+  "tracknet.py",
+]
 
 [tool.ruff]
 target-version = "py311"
