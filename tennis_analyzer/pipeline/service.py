@@ -102,7 +102,7 @@ def recompute_court_dependent_events(artifact_path: Path, result_path: Path | No
 
 def derive_point_scenes(ball_track, bounces: set[int], shots: list[dict], fps: float) -> list[dict]:
     """Derive renderable tennis points from sustained bounce groups in full-video analysis."""
-    gap = max(90, int(fps * 3.0))
+    gap = max(150, int(fps * 5.0))
     groups: list[list[int]] = []
     for bounce in sorted(bounces):
         if not groups or bounce - groups[-1][-1] > gap:
