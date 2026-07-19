@@ -21,7 +21,13 @@ def test_job_creation_and_status(client, sample_video: Path):
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "queued" and body["progress"] == 0
-    assert [stage["key"] for stage in body["workflow"]] == ["scanning", "rendering", "normalizing"]
+    assert [stage["key"] for stage in body["workflow"]] == [
+        "scanning",
+        "ball_tracking",
+        "court_detection",
+        "pose_tracking",
+        "events",
+    ]
     assert body["workflow"][0]["status"] == "pending"
     page = client.get(f"/jobs/{body['id']}")
     assert page.status_code == 200 and "Workflow" in page.text and "Stage progress" in page.text

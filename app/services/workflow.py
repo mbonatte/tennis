@@ -46,7 +46,12 @@ _RENDER_OPTIONS = [
 ]
 
 
-def create_workflow(analysis: AnalysisOptions, visualization: VisualizationOptions | None = None) -> dict[str, Any]:
+def create_workflow(
+    analysis: AnalysisOptions,
+    visualization: VisualizationOptions | None = None,
+    *,
+    include_render: bool = True,
+) -> dict[str, Any]:
     """Create the exact stage plan used by the pipeline for one job."""
     return {
         "version": WORKFLOW_VERSION,
@@ -61,7 +66,7 @@ def create_workflow(analysis: AnalysisOptions, visualization: VisualizationOptio
                 "started_at": None,
                 "completed_at": None,
             }
-            for stage in progress_stages(analysis)
+            for stage in progress_stages(analysis, include_render)
         ],
     }
 

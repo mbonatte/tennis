@@ -38,12 +38,14 @@ def run_render_job(public_id: str) -> None:
         output_dir = safe_job_dir(settings.data_root, analysis.public_id) / "renders" / public_id
         options = VisualizationOptions(**render.visualization_options)
         db.commit()
+
     def progress(stage, percent, message):
         with SessionLocal() as db:
             item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
             if item:
                 item.current_stage, item.progress = stage, percent
                 db.commit()
+
     try:
         output = render_from_artifact(source, artifact, output_dir, options, progress)
         with SessionLocal() as db:
@@ -72,7 +74,9 @@ def run_analysis_job(public_id: str) -> None:
             values = job.submitted_options
             if not job.workflow:
                 job.workflow = create_workflow(
-                    AnalysisOptions(**values["analysis"]), VisualizationOptions(**values["visualization"])
+                    AnalysisOptions(**values["analysis"]),
+                    VisualizationOptions(**values["visualization"]),
+                    include_render=False,
                 )
             transition(job, JobStatus.running, stage="preparing")
             db.commit()
@@ -104,6 +108,7 @@ def run_analysis_job(public_id: str) -> None:
                 ball_batch_size=settings.analysis_ball_batch_size,
                 device=settings.device,
                 execution_mode=settings.analysis_execution_mode,
+                render_output=False,
             )
             input_path = resolve_job_file(settings.data_root, job.input_relative_path)
             output_dir = safe_job_dir(settings.data_root, public_id) / "output"
@@ -117,9 +122,10 @@ def run_analysis_job(public_id: str) -> None:
             else:
                 transition(job, JobStatus.completed)
                 job.workflow = finalize_workflow(job.workflow, JobStatus.completed.value, datetime.now(UTC))
-                job.output_video_relative_path = str(
-                    (output_dir / result.output_video).relative_to(settings.data_root.resolve())
-                )
+                if result.output_video:
+                    job.output_video_relative_path = str(
+                        (output_dir / result.output_video).relative_to(settings.data_root.resolve())
+                    )
                 job.result_relative_path = str(
                     (output_dir / result.result_json).relative_to(settings.data_root.resolve())
                 )
@@ -127,7 +133,8 @@ def run_analysis_job(public_id: str) -> None:
                     job.analysis_artifact_relative_path = str(
                         (output_dir / result.analysis_artifact).relative_to(settings.data_root.resolve())
                     )
-                job.output_size = (output_dir / result.output_video).stat().st_size
+                if result.output_video:
+                    job.output_size = (output_dir / result.output_video).stat().st_size
             db.commit()
     except AnalysisCancelled:
         _mark_terminal(public_id, JobStatus.cancelled, "Analysis cancelled", None)

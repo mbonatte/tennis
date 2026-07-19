@@ -112,23 +112,6 @@ def jobs_page(request: Request, db: Session = Depends(get_db)):
 async def create_job(
     request: Request,
     video: UploadFile = File(...),
-    ball_tracking: bool = Form(False),
-    court_detection: bool = Form(False),
-    player_tracking: bool = Form(False),
-    pose_tracking: bool = Form(False),
-    bounce_detection: bool = Form(False),
-    scene_cut_detection: bool = Form(True),
-    statistics: bool = Form(False),
-    point_analysis: bool = Form(False),
-    ball_trail: bool = Form(False),
-    bounce_markers: bool = Form(False),
-    frame_number: bool = Form(False),
-    court_overlay: bool = Form(False),
-    court_keypoints: bool = Form(False),
-    player_boxes: bool = Form(False),
-    player_poses: bool = Form(False),
-    statistics_overlay: bool = Form(False),
-    ball_history_plot: bool = Form(False),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -141,30 +124,16 @@ async def create_job(
     ):
         raise HTTPException(415, "The upload MIME type is not a video")
     analysis = AnalysisOptions(
-        ball_tracking,
-        court_detection,
-        player_tracking,
-        pose_tracking,
-        bounce_detection,
-        scene_cut_detection,
-        statistics,
-        point_analysis,
-    ).validated()
-    visual = VisualizationOptions(
-        ball_trail,
-        bounce_markers,
-        frame_number,
-        court_overlay,
-        court_keypoints,
-        player_boxes,
-        player_poses,
-        statistics_overlay,
-        ball_history_plot,
+        ball_tracking=True,
+        court_detection=True,
+        player_tracking=True,
+        pose_tracking=True,
+        bounce_detection=True,
+        scene_cut_detection=True,
+        statistics=True,
+        point_analysis=False,
     )
-    try:
-        visual.validate_for(analysis)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+    visual = VisualizationOptions(frame_number=False)
     public_id = str(uuid.uuid4())
     directory = safe_job_dir(settings.data_root, public_id)
     stored = f"source{extension}"
@@ -190,7 +159,7 @@ async def create_job(
         input_relative_path=str(input_path.resolve().relative_to(settings.data_root.resolve())),
         input_size=size,
         submitted_options={"analysis": asdict(analysis), "visualization": asdict(visual)},
-        workflow=create_workflow(analysis, visual),
+        workflow=create_workflow(analysis, visual, include_render=False),
         video_duration=metadata.duration_seconds,
         video_width=metadata.width,
         video_height=metadata.height,
@@ -229,7 +198,12 @@ def job_status_fragment(public_id: str, request: Request, db: Session = Depends(
 
 
 @router.post("/api/jobs/{public_id}/renders")
-def create_render(public_id: str, visual: VisualizationOptions, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+def create_render(
+    public_id: str,
+    visual: VisualizationOptions,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
     job = _job(db, public_id)
     if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
         raise HTTPException(409, "Analysis must finish before rendering")
@@ -255,7 +229,9 @@ def create_render_from_form(
     job = _job(db, public_id)
     if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
         raise HTTPException(409, "Analysis must finish before rendering")
-    visual = VisualizationOptions(ball_trail=ball_trail, bounce_markers=bounce_markers, frame_number=frame_number, court_overlay=court_overlay)
+    visual = VisualizationOptions(
+        ball_trail=ball_trail, bounce_markers=bounce_markers, frame_number=frame_number, court_overlay=court_overlay
+    )
     render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
     db.add(render)
     db.flush()

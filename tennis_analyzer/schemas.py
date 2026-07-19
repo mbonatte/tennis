@@ -71,6 +71,7 @@ class PipelineOptions:
     ball_batch_size: int = 4
     device: str = "cpu"
     execution_mode: str = "low_memory"
+    render_output: bool = True
 
     def validated(self) -> PipelineOptions:
         if not 1 <= self.chunk_size <= 2048:
@@ -90,6 +91,7 @@ class PipelineOptions:
             self.ball_batch_size,
             self.device,
             self.execution_mode,
+            self.render_output,
         )
 
 
@@ -109,7 +111,7 @@ class VideoMetadata:
 @dataclass(frozen=True)
 class AnalysisResult:
     input_filename: str
-    output_video: str
+    output_video: str | None
     result_json: str
     metadata: VideoMetadata
     analysis_options: dict[str, bool]

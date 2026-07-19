@@ -3,33 +3,11 @@
 {% block content %}
 <section class="hero">
   <h1>Analyze a tennis video</h1>
-  <p>Upload a match or point, select only the stages you need, and return later while the worker processes it.</p>
+  <p>Upload a match or point. The complete analysis runs once in the background; choose visual overlays afterward.</p>
 </section>
 <form class="card upload" action="/jobs" method="post" enctype="multipart/form-data">
   <label class="drop"><strong>Video file</strong><input type="file" name="video" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" required><span>MP4, MOV, MKV, AVI, WebM, or M4V · up to {{ max_mb }} MB and {{ max_minutes }} minutes</span></label>
-  <div class="columns">
-    <fieldset><legend>Analysis</legend>
-      <label><input type="checkbox" name="scene_cut_detection" value="true" checked> Scene-cut detection</label>
-      <label><input type="checkbox" name="ball_tracking" value="true"> Ball tracking</label>
-      <label><input type="checkbox" name="court_detection" value="true"> Court detection</label>
-      <label><input type="checkbox" name="player_tracking" value="true"> Player tracking</label>
-      <label><input type="checkbox" name="pose_tracking" value="true"> Player pose tracking</label>
-      <label><input type="checkbox" name="bounce_detection" value="true"> Bounce detection</label>
-      <label><input type="checkbox" name="statistics" value="true"> Experimental statistics</label>
-      <label><input type="checkbox" name="point_analysis" value="true"> Split detected points (experimental)</label>
-    </fieldset>
-    <fieldset><legend>Visualization</legend>
-      <label><input type="checkbox" name="frame_number" value="true" checked> Frame number</label>
-      <label><input type="checkbox" name="ball_trail" value="true"> Ball trail</label>
-      <label><input type="checkbox" name="bounce_markers" value="true"> Bounce markers</label>
-      <label><input type="checkbox" name="court_overlay" value="true"> Court minimap</label>
-      <label><input type="checkbox" name="court_keypoints" value="true"> Court keypoints</label>
-      <label><input type="checkbox" name="player_boxes" value="true"> Player boxes</label>
-      <label><input type="checkbox" name="player_poses" value="true"> Player poses</label>
-      <label><input type="checkbox" name="statistics_overlay" value="true"> Statistics overlay</label>
-      <label><input type="checkbox" name="ball_history_plot" value="true"> Ball-history plot</label>
-    </fieldset>
-  </div>
+  <p class="notice">Full analysis includes ball, court, player, pose, bounce, scene, and statistics data.</p>
   <p class="notice">Model stages can take many minutes, especially on CPU. The job continues if you close this page.</p>
   <button type="submit">Queue analysis</button>
 </form>

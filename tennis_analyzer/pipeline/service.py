@@ -14,8 +14,8 @@ import numpy as np
 
 from tennis_analyzer.config import ModelPaths
 from tennis_analyzer.errors import AnalysisCancelled, MissingModelError, VideoProcessingError
-from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
 from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
+from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
 from tennis_analyzer.pipeline.chunks import iter_frame_chunks
 from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
@@ -27,6 +27,16 @@ CancellationCheck = Callable[[], bool]
 logger = logging.getLogger(__name__)
 
 
+def _save_result(path: Path, result: AnalysisResult) -> None:
+    temporary = path.with_suffix(".tmp")
+    try:
+        temporary.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
 def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None):
     """Render annotations without loading any analysis model."""
     artifact = read_artifact(Path(artifact_path))
@@ -35,9 +45,13 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     metadata = probe_video(source)
     ball_track = artifact["ball_track"]
     bounces = set(artifact["bounces"])
-    homographies = [np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]]
+    homographies = [
+        np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]
+    ]
     output = destination / "rendered.mp4"
-    writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*"mp4v"), metadata.fps, (metadata.width, metadata.height))
+    writer = cv2.VideoWriter(
+        str(output), cv2.VideoWriter_fourcc(*"mp4v"), metadata.fps, (metadata.width, metadata.height)
+    )
     if not writer.isOpened():
         raise VideoProcessingError("Could not create render output")
     total = 0
@@ -49,21 +63,27 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 if visual.ball_trail:
                     for age in range(7):
                         point_index = index - age
-                        if point_index < 0: break
+                        if point_index < 0:
+                            break
                         point = ball_track[point_index]
                         if point[0] is not None and point[1] is not None:
-                            cv2.circle(annotated, (int(point[0]), int(point[1])), 2, (0, 0, 255), max(1, 7-age))
+                            cv2.circle(annotated, (int(point[0]), int(point[1])), 2, (0, 0, 255), max(1, 7 - age))
                 if visual.court_overlay and index < len(homographies):
                     from court import draw_court_overlay_in_place
+
                     draw_court_overlay_in_place(annotated, homographies[index], ball_track[index], index in bounces)
                 if visual.frame_number:
-                    cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, .8, (0,255,0), 2)
+                    cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 writer.write(annotated)
                 total += 1
-            if progress_callback: progress_callback("rendering", min(99, int(total * 100 / max(1, len(ball_track)))), "Rendering saved analysis")
+            if progress_callback:
+                progress_callback(
+                    "rendering", min(99, int(total * 100 / max(1, len(ball_track)))), "Rendering saved analysis"
+                )
     finally:
         writer.release()
-    if progress_callback: progress_callback("completed", 100, "Render completed")
+    if progress_callback:
+        progress_callback("completed", 100, "Render completed")
     return output
 
 
@@ -96,7 +116,7 @@ def _require_models(options: PipelineOptions, models: ModelPaths) -> None:
         raise MissingModelError("Missing required model file(s): " + ", ".join(missing))
 
 
-def progress_stages(analysis) -> list[WorkStage]:
+def progress_stages(analysis, include_render: bool = True) -> list[WorkStage]:
     """Return the exact weighted stage plan for the selected analysis options."""
     stages = [WorkStage("scanning", 1)]
     if analysis.ball_tracking:
@@ -111,10 +131,11 @@ def progress_stages(analysis) -> list[WorkStage]:
         )
     if analysis.bounce_detection or analysis.statistics:
         stages.append(WorkStage("events", 1))
-    stages.append(WorkStage("rendering", 3))
-    if analysis.point_analysis:
-        stages.append(WorkStage("point_analysis", 2))
-    stages.append(WorkStage("normalizing", 3))
+    if include_render:
+        stages.append(WorkStage("rendering", 3))
+        if analysis.point_analysis:
+            stages.append(WorkStage("point_analysis", 2))
+        stages.append(WorkStage("normalizing", 3))
     return stages
 
 
@@ -162,7 +183,7 @@ def analyze_video(
         if progress_callback:
             progress_callback(stage, percent, message)
 
-    progress = WeightedProgress(progress_stages(selected.analysis), emit)
+    progress = WeightedProgress(progress_stages(selected.analysis, selected.render_output), emit)
     logger.info(
         "Starting low-memory analysis",
         extra={
@@ -318,6 +339,27 @@ def analyze_video(
         },
     )
 
+    if not selected.render_output:
+        result_path = destination / "result.json"
+        result = AnalysisResult(
+            input_filename=source.name,
+            output_video=None,
+            result_json=result_path.name,
+            metadata=metadata,
+            analysis_options=asdict(analysis),
+            visualization_options={},
+            analysis_artifact=artifact_path.name,
+            shots=shots,
+            bounces=bounce_events,
+            player_statistics=player_statistics,
+            summary=summary,
+            scene_cuts=scene_cuts,
+            warnings=["Speeds, event classification, and in/out calls are experimental estimates."],
+        )
+        _save_result(result_path, result)
+        progress.complete()
+        return result
+
     raw_output = destination / ".annotated.mp4"
     raw_output.unlink(missing_ok=True)
     writer = cv2.VideoWriter(
@@ -443,13 +485,7 @@ def analyze_video(
         plots=plots,
         warnings=["Speeds, event classification, and in/out calls are experimental estimates."],
     )
-    temporary_json = result_path.with_suffix(".tmp")
-    try:
-        temporary_json.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
-        temporary_json.replace(result_path)
-    except Exception:
-        temporary_json.unlink(missing_ok=True)
-        raise
+    _save_result(result_path, result)
     progress.complete()
     return result
 
