@@ -4,6 +4,7 @@ import torch
 
 from homography import get_trans_matrix, refer_kps  # Homography utilities
 from postprocess import refine_kps  # Custom function to refine keypoint locations
+from tennis_analyzer.checkpoints import normalize_state_dict
 from tennis_analyzer.errors import VideoProcessingError
 from tracknet import Tracker  # Custom neural network model for keypoint tracking
 
@@ -15,8 +16,7 @@ class CourtDetectorNet:
         if path_model:
             try:
                 checkpoint = torch.load(path_model, map_location=self.device, weights_only=True)
-                state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
-                self.model.load_state_dict(state_dict)
+                self.model.load_state_dict(normalize_state_dict(checkpoint))
             except (OSError, RuntimeError, TypeError, ValueError) as exc:
                 raise VideoProcessingError("The court-detection checkpoint is incompatible or unreadable") from exc
         self.model = self.model.to(self.device)

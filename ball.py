@@ -8,6 +8,7 @@ import numpy as np
 import torch
 
 from BallTrack.model import BallTrackerNet
+from tennis_analyzer.checkpoints import normalize_state_dict
 from tennis_analyzer.errors import VideoProcessingError
 from tennis_analyzer.pipeline.ball_track import euclidean as _euclidean
 from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
@@ -27,8 +28,7 @@ def load_model(model_path: Path, device: torch.device, use_compile: bool = False
     model = BallTrackerNet()
     try:
         checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-        state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
-        model.load_state_dict(state_dict)
+        model.load_state_dict(normalize_state_dict(checkpoint))
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
         raise VideoProcessingError("The ball-tracking checkpoint is incompatible or unreadable") from exc
     model.to(device)
