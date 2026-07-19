@@ -217,7 +217,7 @@ async def create_job(
 @router.get("/jobs/{public_id}", response_class=HTMLResponse)
 def job_page(public_id: str, request: Request, db: Session = Depends(get_db)):
     job = _job(db, public_id)
-    result = _load_result(job, get_settings()) if job.status == JobStatus.completed else None
+    result = _load_result(job, get_settings()) if job.status == JobStatus.completed and job.result_relative_path else None
     return templates.TemplateResponse(request, "job.html", {"job": job, "result": result})
 
 
@@ -509,6 +509,8 @@ def job_results(public_id: str, db: Session = Depends(get_db), settings: Setting
     job = _job(db, public_id)
     if job.status != JobStatus.completed:
         raise HTTPException(409, "Analysis is not completed")
+    if job.current_stage == "scene_review":
+        return {"status": "scene_review", "scene_review": (job.submitted_options or {}).get("scene_review", {})}
     return _load_result(job, settings)
 
 
