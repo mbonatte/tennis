@@ -184,6 +184,7 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     keypoints = artifact.get("court_keypoints", [])
     player_tracks = artifact.get("player_tracks", [])
     summary = artifact.get("summary", {})
+    scorecard = artifact.get("scorecard", {})
     if court_calibration:
         corrected_homography = calibration_homography(court_calibration)
         corrected_keypoints = calibrated_keypoints(court_calibration)
@@ -244,6 +245,8 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                     )
                 if visual.statistics_overlay:
                     _draw_saved_summary(annotated, summary)
+                if visual.scoreboard_overlay:
+                    _draw_scoreboard(annotated, scorecard)
                 if visual.frame_number:
                     cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                 writer.write(annotated)
@@ -274,6 +277,13 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     if progress_callback:
         progress_callback("completed", 100, "Render completed")
     return output
+
+
+def _draw_scoreboard(frame, scorecard: dict) -> None:
+    games, sets = scorecard.get("games", {}), scorecard.get("sets", {})
+    text = f"TOP {sets.get('top_player', 0)} sets / {games.get('top_player', 0)} games    BOTTOM {sets.get('bottom_player', 0)} / {games.get('bottom_player', 0)}"
+    cv2.rectangle(frame, (8, 42), (min(frame.shape[1] - 8, 620), 72), (0, 0, 0), -1)
+    cv2.putText(frame, text, (14, 64), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1)
 
 
 def _draw_ball_trail(frame, ball_track, index: int, visual) -> None:

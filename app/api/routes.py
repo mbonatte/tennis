@@ -440,6 +440,7 @@ def create_render_from_form(
     player_box_color: str = Form("#28c850", max_length=7),
     player_poses: bool = Form(False),
     statistics_overlay: bool = Form(False),
+    scoreboard_overlay: bool = Form(False),
     top_player_label: str = Form("Top player", max_length=40),
     bottom_player_label: str = Form("Bottom player", max_length=40),
     db: Session = Depends(get_db),
@@ -463,6 +464,7 @@ def create_render_from_form(
         player_box_color=player_box_color,
         player_poses=player_poses,
         statistics_overlay=statistics_overlay,
+        scoreboard_overlay=scoreboard_overlay,
         top_player_label=top_player_label,
         bottom_player_label=bottom_player_label,
     )

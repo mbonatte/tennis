@@ -51,6 +51,7 @@ class VisualizationOptions:
     player_box_color: str = "#28c850"
     player_poses: bool = False
     statistics_overlay: bool = False
+    scoreboard_overlay: bool = False
     ball_history_plot: bool = False
     top_player_label: str = "Top player"
     bottom_player_label: str = "Bottom player"
