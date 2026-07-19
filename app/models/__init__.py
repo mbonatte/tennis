@@ -1,3 +1,3 @@
-from app.models.job import AnalysisJob, JobStatus
+from app.models.job import AnalysisJob, JobStatus, RenderOutput
 
-__all__ = ["AnalysisJob", "JobStatus"]
+__all__ = ["AnalysisJob", "JobStatus", "RenderOutput"]

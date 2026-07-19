@@ -15,7 +15,7 @@ import numpy as np
 from tennis_analyzer.config import ModelPaths
 from tennis_analyzer.errors import AnalysisCancelled, MissingModelError, VideoProcessingError
 from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
-from tennis_analyzer.pipeline.artifact import write_artifact
+from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
 from tennis_analyzer.pipeline.chunks import iter_frame_chunks
 from tennis_analyzer.pipeline.progress import WeightedProgress, WorkStage
 from tennis_analyzer.pipeline.stages import StageFactories
@@ -25,6 +25,46 @@ from tennis_analyzer.video import normalize_video, probe_video
 ProgressCallback = Callable[[str, int, str], None]
 CancellationCheck = Callable[[], bool]
 logger = logging.getLogger(__name__)
+
+
+def render_from_artifact(source, artifact_path, destination, visual, progress_callback=None):
+    """Render annotations without loading any analysis model."""
+    artifact = read_artifact(Path(artifact_path))
+    source, destination = Path(source), Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    metadata = probe_video(source)
+    ball_track = artifact["ball_track"]
+    bounces = set(artifact["bounces"])
+    homographies = [np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]]
+    output = destination / "rendered.mp4"
+    writer = cv2.VideoWriter(str(output), cv2.VideoWriter_fourcc(*"mp4v"), metadata.fps, (metadata.width, metadata.height))
+    if not writer.isOpened():
+        raise VideoProcessingError("Could not create render output")
+    total = 0
+    try:
+        for chunk in iter_frame_chunks(source, 128):
+            for offset, frame in enumerate(chunk.frames):
+                index = chunk.start_frame + offset
+                annotated = frame.copy()
+                if visual.ball_trail:
+                    for age in range(7):
+                        point_index = index - age
+                        if point_index < 0: break
+                        point = ball_track[point_index]
+                        if point[0] is not None and point[1] is not None:
+                            cv2.circle(annotated, (int(point[0]), int(point[1])), 2, (0, 0, 255), max(1, 7-age))
+                if visual.court_overlay and index < len(homographies):
+                    from court import draw_court_overlay_in_place
+                    draw_court_overlay_in_place(annotated, homographies[index], ball_track[index], index in bounces)
+                if visual.frame_number:
+                    cv2.putText(annotated, f"Frame: {index}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, .8, (0,255,0), 2)
+                writer.write(annotated)
+                total += 1
+            if progress_callback: progress_callback("rendering", min(99, int(total * 100 / max(1, len(ball_track)))), "Rendering saved analysis")
+    finally:
+        writer.release()
+    if progress_callback: progress_callback("completed", 100, "Render completed")
+    return output
 
 
 def _histogram(frame: np.ndarray) -> np.ndarray:

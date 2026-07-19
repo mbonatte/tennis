@@ -4,8 +4,8 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, BigInteger, DateTime, Enum, Float, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import JSON, BigInteger, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -54,3 +54,18 @@ class AnalysisJob(Base):
     pipeline_version: Mapped[str] = mapped_column(String(40), default="0.1.0")
     queue_job_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     cancellation_requested: Mapped[bool] = mapped_column(default=False)
+    renders: Mapped[list["RenderOutput"]] = relationship(back_populates="analysis", cascade="all, delete-orphan")
+
+
+class RenderOutput(Base):
+    __tablename__ = "render_outputs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String(36), unique=True, index=True, default=lambda: str(uuid.uuid4()))
+    analysis_id: Mapped[int] = mapped_column(ForeignKey("analysis_jobs.id"), nullable=False)
+    status: Mapped[JobStatus] = mapped_column(Enum(JobStatus), default=JobStatus.uploaded)
+    visualization_options: Mapped[dict] = mapped_column(JSON, default=dict)
+    output_relative_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    current_stage: Mapped[str] = mapped_column(String(80), default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    analysis: Mapped[AnalysisJob] = relationship(back_populates="renders")

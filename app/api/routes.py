@@ -18,9 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
 from app.db.session import get_db
-from app.models import AnalysisJob, JobStatus
+from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
-from app.services.queue import enqueue_analysis
+from app.services.queue import enqueue_analysis, enqueue_render
 from app.services.storage import delete_job_files, resolve_job_file, safe_job_dir, sanitize_filename, stream_upload
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
@@ -226,6 +226,19 @@ def job_page(public_id: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/jobs/{public_id}/status", response_class=HTMLResponse)
 def job_status_fragment(public_id: str, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "_job_status.html", {"job": _job(db, public_id)})
+
+
+@router.post("/api/jobs/{public_id}/renders")
+def create_render(public_id: str, visual: VisualizationOptions, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    job = _job(db, public_id)
+    if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
+        raise HTTPException(409, "Analysis must finish before rendering")
+    render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
+    db.add(render)
+    db.flush()
+    enqueue_render(render.public_id, settings)
+    db.commit()
+    return {"id": render.public_id, "status": render.status.value}
 
 
 @router.get("/api/jobs/{public_id}")

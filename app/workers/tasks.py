@@ -9,15 +9,55 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.logging import job_id_context
 from app.db.session import SessionLocal
-from app.models import AnalysisJob, JobStatus
+from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
 from app.services.storage import resolve_job_file, safe_job_dir
 from app.services.workflow import create_workflow, finalize_workflow, record_progress
 from tennis_analyzer.errors import AnalysisCancelled, AnalysisError
 from tennis_analyzer.pipeline import analyze_video
+from tennis_analyzer.pipeline.service import render_from_artifact
 from tennis_analyzer.schemas import AnalysisOptions, PipelineOptions, VisualizationOptions
 
 logger = logging.getLogger(__name__)
+
+
+def run_render_job(public_id: str) -> None:
+    settings = get_settings()
+    with SessionLocal() as db:
+        render = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
+        if not render or render.status != JobStatus.queued:
+            return
+        analysis = render.analysis
+        if analysis.status != JobStatus.completed or not analysis.analysis_artifact_relative_path:
+            render.status, render.current_stage = JobStatus.failed, "failed"
+            db.commit()
+            return
+        render.status, render.current_stage = JobStatus.running, "rendering"
+        source = resolve_job_file(settings.data_root, analysis.input_relative_path)
+        artifact = resolve_job_file(settings.data_root, analysis.analysis_artifact_relative_path)
+        output_dir = safe_job_dir(settings.data_root, analysis.public_id) / "renders" / public_id
+        options = VisualizationOptions(**render.visualization_options)
+        db.commit()
+    def progress(stage, percent, message):
+        with SessionLocal() as db:
+            item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
+            if item:
+                item.current_stage, item.progress = stage, percent
+                db.commit()
+    try:
+        output = render_from_artifact(source, artifact, output_dir, options, progress)
+        with SessionLocal() as db:
+            item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
+            item.status, item.progress, item.current_stage = JobStatus.completed, 100, "completed"
+            item.output_relative_path = str(output.relative_to(settings.data_root.resolve()))
+            db.commit()
+    except Exception:
+        logger.exception("Render failed")
+        with SessionLocal() as db:
+            item = db.scalar(select(RenderOutput).where(RenderOutput.public_id == public_id))
+            if item:
+                item.status, item.current_stage = JobStatus.failed, "failed"
+                db.commit()
 
 
 def run_analysis_job(public_id: str) -> None:
