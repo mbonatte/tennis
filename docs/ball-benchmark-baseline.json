@@ -1,0 +1,78 @@
+{
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.7",
+    "torch": "2.8.0+cpu",
+    "device": "cpu",
+    "cuda_available": false,
+    "gpu": null
+  },
+  "video": {
+    "path": "new_video.mp4",
+    "width": 1110,
+    "height": 720,
+    "fps": 30.0
+  },
+  "results": [
+    {
+      "chunk_size": 16,
+      "batch_size": 1,
+      "frame_count": 10,
+      "runtime_seconds": 24.594030900043435,
+      "peak_rss_mb": 2263.01171875,
+      "decode_seconds": 0.12118419993203133,
+      "continuity_seconds": 0.0004770000232383609,
+      "resize_seconds": 0.01,
+      "input_seconds": 0.037,
+      "transfer_seconds": 0.001,
+      "inference_seconds": 24.277,
+      "prediction_postprocess_seconds": 0.096,
+      "frames_per_second": 0.40660272570375355
+    },
+    {
+      "chunk_size": 16,
+      "batch_size": 4,
+      "frame_count": 10,
+      "runtime_seconds": 24.748900500009768,
+      "peak_rss_mb": 4193.69921875,
+      "decode_seconds": 0.16963680007029325,
+      "continuity_seconds": 0.0003782999701797962,
+      "resize_seconds": 0.009,
+      "input_seconds": 0.048,
+      "transfer_seconds": 0.0,
+      "inference_seconds": 24.367,
+      "prediction_postprocess_seconds": 0.093,
+      "frames_per_second": 0.4040583540265174
+    },
+    {
+      "chunk_size": 32,
+      "batch_size": 1,
+      "frame_count": 10,
+      "runtime_seconds": 24.52386060007848,
+      "peak_rss_mb": 4239.7734375,
+      "decode_seconds": 0.3112984999315813,
+      "continuity_seconds": 0.00032190000638365746,
+      "resize_seconds": 0.008,
+      "input_seconds": 0.041,
+      "transfer_seconds": 0.001,
+      "inference_seconds": 24.003,
+      "prediction_postprocess_seconds": 0.096,
+      "frames_per_second": 0.40776614102789344
+    },
+    {
+      "chunk_size": 32,
+      "batch_size": 4,
+      "frame_count": 10,
+      "runtime_seconds": 23.904682300053537,
+      "peak_rss_mb": 4252.98828125,
+      "decode_seconds": 0.32126599992625415,
+      "continuity_seconds": 0.0003341999836266041,
+      "resize_seconds": 0.008,
+      "input_seconds": 0.053,
+      "transfer_seconds": 0.0,
+      "inference_seconds": 23.365,
+      "prediction_postprocess_seconds": 0.092,
+      "frames_per_second": 0.418328086292015
+    }
+  ]
+}

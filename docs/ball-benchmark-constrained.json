@@ -1,0 +1,33 @@
+{
+  "environment": {
+    "platform": "Windows-11-10.0.26200-SP0",
+    "python": "3.12.7",
+    "torch": "2.8.0+cpu",
+    "device": "cpu",
+    "cuda_available": false,
+    "gpu": null
+  },
+  "video": {
+    "path": "new_video.mp4",
+    "width": 1110,
+    "height": 720,
+    "fps": 30.0
+  },
+  "results": [
+    {
+      "chunk_size": 16,
+      "batch_size": 4,
+      "frame_count": 10,
+      "runtime_seconds": 23.76053679990582,
+      "peak_rss_mb": 4519.11328125,
+      "decode_seconds": 0.13292130012996495,
+      "continuity_seconds": 0.0004966999404132366,
+      "resize_seconds": 0.009,
+      "input_seconds": 0.076,
+      "transfer_seconds": 0.0,
+      "inference_seconds": 23.396,
+      "prediction_postprocess_seconds": 0.092,
+      "frames_per_second": 0.42086591242499355
+    }
+  ]
+}

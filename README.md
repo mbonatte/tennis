@@ -12,7 +12,7 @@ Event detection, in/out calls, speeds, distances, point splitting, and player ro
 
 ## Architecture and layout
 
-FastAPI/Jinja2 and a small local stylesheet form the web tier. PostgreSQL stores job metadata, Redis/RQ runs one ML job at a time, OpenCV performs bounded frame inference/rendering, and FFmpeg probes and normalizes H.264/AAC MP4 output. See [architecture](docs/ARCHITECTURE.md), [performance and constrained-host operation](docs/PERFORMANCE.md), [audit](docs/REPOSITORY_AUDIT.md), [options](docs/ANALYSIS_OPTIONS.md), and [result schema](docs/RESULT_SCHEMA.md).
+FastAPI/Jinja2 and a small local stylesheet form the web tier. PostgreSQL stores job metadata, Redis/RQ runs one ML job at a time, OpenCV performs bounded frame inference/rendering, and FFmpeg probes and normalizes H.264/AAC MP4 output. See [analysis pipeline](docs/ANALYSIS_PIPELINE.md), [architecture](docs/ARCHITECTURE.md), [performance and constrained-host operation](docs/PERFORMANCE.md), [audit](docs/REPOSITORY_AUDIT.md), [options](docs/ANALYSIS_OPTIONS.md), and [result schema](docs/RESULT_SCHEMA.md).
 
 ```text
 app/                    web routes, settings, DB model, services, templates, worker
