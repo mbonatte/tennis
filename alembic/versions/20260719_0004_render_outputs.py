@@ -4,13 +4,29 @@ Revision ID: 20260719_0004
 Revises: 20260719_0003
 """
 
-from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = "20260719_0004"
 down_revision = "20260719_0003"
 branch_labels = None
 depends_on = None
+
+
+def _existing_job_status_enum() -> postgresql.ENUM:
+    """Reference the enum created by the initial jobs migration."""
+    return postgresql.ENUM(
+        "uploaded",
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        name="jobstatus",
+        create_type=False,
+    )
 
 
 def upgrade() -> None:
@@ -21,9 +37,7 @@ def upgrade() -> None:
         sa.Column("analysis_id", sa.Integer(), sa.ForeignKey("analysis_jobs.id"), nullable=False),
         sa.Column(
             "status",
-            sa.Enum(
-                "uploaded", "queued", "running", "completed", "failed", "cancelled", name="jobstatus", create_type=False
-            ),
+            _existing_job_status_enum(),
             nullable=False,
         ),
         sa.Column("visualization_options", sa.JSON(), nullable=False),
