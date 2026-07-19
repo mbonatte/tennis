@@ -246,6 +246,9 @@ def court_calibration_data(
         artifact = read_artifact(resolve_job_file(settings.data_root, job.analysis_artifact_relative_path))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(500, "Saved analysis artifact is unavailable") from exc
+    frame_count = int(artifact.get("frame_count") or 0)
+    if frame_index >= frame_count:
+        raise HTTPException(422, "Requested calibration frame is outside the source video")
     keypoints = artifact.get("court_keypoints", [])
     suggested = suggested_outer_corners(keypoints[frame_index]) if frame_index < len(keypoints) else None
     calibration = job.court_calibration
@@ -273,6 +276,9 @@ def court_preview(
         raise HTTPException(422, "Calibration frame must be non-negative")
     capture = cv2.VideoCapture(str(resolve_job_file(settings.data_root, job.input_relative_path)))
     try:
+        frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count and frame_index >= frame_count:
+            raise HTTPException(422, "Requested calibration frame is outside the source video")
         capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
         ok, frame = capture.read()
     finally:

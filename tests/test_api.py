@@ -168,6 +168,7 @@ def test_completed_analysis_supports_reusable_court_calibration(client, sample_v
     suggestion = client.get(f"/api/jobs/{public_id}/court-calibration?frame_index=0")
     assert suggestion.status_code == 200
     assert suggestion.json()["image_points"] == [[10.0, 10.0], [300.0, 10.0], [300.0, 220.0], [10.0, 220.0]]
+    assert client.get(f"/api/jobs/{public_id}/court-calibration?frame_index=1").status_code == 422
     preview = client.get(f"/jobs/{public_id}/court-preview.jpg?frame_index=0")
     assert preview.status_code == 200 and preview.headers["content-type"] == "image/jpeg"
 
