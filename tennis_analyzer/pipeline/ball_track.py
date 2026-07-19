@@ -53,7 +53,7 @@ def split_track(track: list[BallPoint], max_gap: int = 4, max_distance_gap: floa
     return result
 
 
-def interpolation(coordinates: list[BallPoint]) -> list[tuple[float, float]]:
+def interpolation(coordinates: list[BallPoint]) -> list[BallPoint]:
     x_values = np.asarray([point[0] if point[0] is not None else np.nan for point in coordinates], dtype=float)
     y_values = np.asarray([point[1] if point[1] is not None else np.nan for point in coordinates], dtype=float)
     for values in (x_values, y_values):
@@ -61,7 +61,10 @@ def interpolation(coordinates: list[BallPoint]) -> list[tuple[float, float]]:
         missing = np.where(np.isnan(values))[0]
         if len(valid) >= 2:
             values[missing] = np.interp(missing, valid, values[valid])
-    return list(zip(x_values, y_values, strict=True))
+    return [
+        (float(x), float(y)) if np.isfinite(x) and np.isfinite(y) else (None, None)
+        for x, y in zip(x_values, y_values, strict=True)
+    ]
 
 
 def postprocess_ball_track(raw_track: list[BallPoint], *, extrapolation: bool = True) -> list[BallPoint]:
@@ -71,4 +74,9 @@ def postprocess_ball_track(raw_track: list[BallPoint], *, extrapolation: bool = 
     if extrapolation:
         for start, end in split_track(ball_track):
             ball_track[start:end] = interpolation(ball_track[start:end])
-    return ball_track
+    return [
+        (float(point[0]), float(point[1]))
+        if point[0] is not None and point[1] is not None and np.isfinite(point[0]) and np.isfinite(point[1])
+        else (None, None)
+        for point in ball_track
+    ]

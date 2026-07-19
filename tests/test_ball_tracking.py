@@ -70,3 +70,9 @@ def test_chunked_and_unchunked_global_postprocessing_are_equivalent():
     raw[3] = (None, None)
 
     assert ball.postprocess_ball_track(raw[:4] + raw[4:]) == ball.postprocess_ball_track(raw)
+
+
+def test_global_postprocessing_normalizes_nonfinite_missing_values():
+    raw = [(None, None), (float("nan"), float("nan")), (float("inf"), 2.0)]
+
+    assert ball.postprocess_ball_track(raw) == [(None, None), (None, None), (None, None)]
