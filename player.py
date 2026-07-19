@@ -67,7 +67,11 @@ class BasePlayerTracker:
 
         self.last_top_player = None
         self.last_bottom_player = None
+        self._top_missing_frames = 0
+        self._bottom_missing_frames = 0
+        self.max_missing_frames = 8
 
+    @torch.inference_mode()
     def track_frame(self, frame):
         """
         Run YOLO tracking on one frame.
@@ -108,7 +112,6 @@ class BasePlayerTracker:
         self.last_bottom_player = None
         self._top_missing_frames = 0
         self._bottom_missing_frames = 0
-        self.max_missing_frames = 8
         if str(self.device).startswith("cuda"):
             torch.cuda.empty_cache()
 
@@ -672,7 +675,6 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.top_recovery_zoom = top_recovery_zoom
         self.last_valid_top_player = None
 
-    @torch.inference_mode()
     @torch.inference_mode()
     def track_frame(self, frame):
         """
