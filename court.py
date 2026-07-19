@@ -1,20 +1,49 @@
 from __future__ import annotations
 
+from functools import lru_cache
 
 import cv2
-import torch
 import numpy as np
+import torch
 
 from court_detection_net import CourtDetectorNet
 from court_reference import CourtReference
+from tennis_analyzer.errors import VideoProcessingError
+
+
+class CourtTracker:
+    """Own one court detector for an entire analysis stage."""
+
+    def __init__(self, detector, device):
+        self.detector = detector
+        self.device = torch.device(device)
+
+    @classmethod
+    def from_checkpoint(cls, model_path="weights/tennis_court.pt", device_name=None):
+        device = torch.device(device_name or ("cuda" if torch.cuda.is_available() else "cpu"))
+        return cls(CourtDetectorNet(model_path, device), device)
+
+    def process_chunk(self, frames):
+        if not frames:
+            return [], []
+        homographies, keypoints = self.detector.infer_model(frames)
+        if len(homographies) != len(frames) or len(keypoints) != len(frames):
+            raise VideoProcessingError("Court inference returned an unexpected number of frame results")
+        return homographies, keypoints
+
+    def close(self):
+        self.detector = None
+        if self.device.type == "cuda":
+            torch.cuda.empty_cache()
 
 
 def track_court(frames, model_path="weights/tennis_court.pt", device_name=None):
-    device = device_name or ('cuda' if torch.cuda.is_available() else 'cpu')
-    court_detector = CourtDetectorNet(model_path, device)
-    homography_matrices, kps_court = court_detector.infer_model(frames)
-
-    return homography_matrices, kps_court 
+    """Compatibility helper; the production pipeline owns ``CourtTracker``."""
+    tracker = CourtTracker.from_checkpoint(model_path, device_name)
+    try:
+        return tracker.process_chunk(frames)
+    finally:
+        tracker.close()
 
 def draw_court(
     frames,
@@ -183,6 +212,7 @@ def draw_keypoints(frames, kps_court):
 
     return output_frames
 
+@lru_cache(maxsize=1)
 def get_court_img():
     court_reference = CourtReference()
     court = court_reference.build_court_reference()

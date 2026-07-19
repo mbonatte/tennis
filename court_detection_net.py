@@ -1,27 +1,32 @@
 import cv2
 import numpy as np
-from tqdm import tqdm
 import torch
-import torch.nn.functional as F
+from tqdm import tqdm
 
-from tracknet import Tracker # Custom neural network model for keypoint tracking
-from postprocess import refine_kps # Custom function to refine keypoint locations
-from homography import get_trans_matrix, refer_kps # Homography utilities
+from homography import get_trans_matrix, refer_kps  # Homography utilities
+from postprocess import refine_kps  # Custom function to refine keypoint locations
+from tennis_analyzer.errors import VideoProcessingError
+from tracknet import Tracker  # Custom neural network model for keypoint tracking
 
-class CourtDetectorNet():
-    def __init__(self, path_model=None,  device='cpu'):
+class CourtDetectorNet:
+    def __init__(self, path_model=None, device="cpu", model=None):
         # Initialize the neural network with 15 output channels (keypoints/heatmaps)
-        self.model = Tracker(out_channels=15)
-        
-        self.device = device
+        self.model = model or Tracker(out_channels=15)
+        self.device = torch.device(device)
         if path_model:
-            state_dict = torch.load(path_model, map_location=device, weights_only=True)
-            self.model.load_state_dict(state_dict)
-            self.model = self.model.to(device)
-            # Set model to evaluation mode (disables dropout, etc.)
-            self.model.eval()
-            
+            try:
+                checkpoint = torch.load(path_model, map_location=self.device, weights_only=True)
+                state_dict = checkpoint.get("state_dict", checkpoint) if isinstance(checkpoint, dict) else checkpoint
+                self.model.load_state_dict(state_dict)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                raise VideoProcessingError("The court-detection checkpoint is incompatible or unreadable") from exc
+        self.model = self.model.to(self.device)
+        self.model.eval()
+
+    @torch.inference_mode()
     def infer_model(self, frames):
+        if not frames:
+            return [], []
         # Define output resolution for resizing input frames
         output_width = 640
         output_height = 360
@@ -45,16 +50,16 @@ class CourtDetectorNet():
             inp = (img.astype(np.float32) / 255.)
             
             # Change image shape from (H, W, C) to (C, H, W)
-            inp = torch.tensor(np.rollaxis(inp, 2, 0))
+            inp = torch.from_numpy(np.rollaxis(inp, 2, 0))
             
             # Add batch dimension → shape becomes (1, C, H, W)
             inp = inp.unsqueeze(0)
 
             # Run inference through the model
-            out = self.model(inp.float().to(self.device))[0]
+            out = self.model(inp.to(self.device, dtype=torch.float32))[0]
             
             # Apply sigmoid to convert outputs to probabilities
-            pred = F.sigmoid(out).detach().cpu().numpy()
+            pred = torch.sigmoid(out).cpu().numpy()
 
             # Store detected keypoints for this frame
             points = []
