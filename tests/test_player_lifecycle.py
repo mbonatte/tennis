@@ -137,3 +137,14 @@ def test_player_assignment_keeps_bottom_identity_when_it_crosses_the_screen_midl
     assert by_role["bottom_player"].track_id == 1
     assert by_role["bottom_player"].center == (420, 210)
     assert by_role["top_player"].track_id == 2
+
+
+def test_bottom_recovery_roi_keeps_search_bounded_around_last_player_box():
+    tracker = object.__new__(player.HybridPlayerTracker)
+    frame = np.zeros((720, 1280, 3), dtype=np.uint8)
+
+    roi, offset = tracker._bottom_recovery_roi(frame, (500, 240, 560, 370))
+
+    assert roi.size > 0
+    assert offset[0] > 0 and offset[1] > 0
+    assert roi.shape[0] < frame.shape[0] and roi.shape[1] < frame.shape[1]

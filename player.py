@@ -701,6 +701,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.top_recovery_conf = top_recovery_conf
         self.top_recovery_zoom = top_recovery_zoom
         self.last_valid_top_player = None
+        self.last_valid_bottom_player = None
 
     @torch.inference_mode()
     def track_frame(self, frame):
@@ -711,6 +712,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         """
         box_players, box_result = super().track_frame(frame)
         box_players = self._recover_top_player_if_needed(frame, box_players)
+        box_players = self._recover_bottom_player_if_needed(frame, box_players)
 
         pose_result = self._run_pose_model(frame)
         pose_detections = self._extract_pose_detections(pose_result)
@@ -844,6 +846,89 @@ class HybridPlayerTracker(BoxPlayerTracker):
 
         return frame[roi_y1:roi_y2, roi_x1:roi_x2], (roi_x1, roi_y1)
 
+    def _recover_bottom_player_if_needed(self, frame, players):
+        bottom_player = self._get_role(players, "bottom_player")
+        if bottom_player is not None and self._is_valid_bottom_recovery_player(bottom_player, frame.shape):
+            if bottom_player.track_id is not None:
+                self.last_valid_bottom_player = bottom_player
+            return players
+
+        recovered_bottom = self._detect_bottom_player_in_zoomed_roi(frame)
+        players = [player for player in players if player.role != "bottom_player"]
+        if recovered_bottom is not None:
+            self.last_valid_bottom_player = recovered_bottom
+            players.append(recovered_bottom)
+        return sorted(players, key=lambda player: 0 if player.role == "top_player" else 1)
+
+    def _detect_bottom_player_in_zoomed_roi(self, frame):
+        if self.last_valid_bottom_player is None:
+            return None
+
+        roi, offset = self._bottom_recovery_roi(frame, self.last_valid_bottom_player.bbox)
+        if roi.size == 0:
+            return None
+        zoomed_roi = cv2.resize(
+            roi,
+            None,
+            fx=self.top_recovery_zoom,
+            fy=self.top_recovery_zoom,
+            interpolation=cv2.INTER_LINEAR,
+        )
+        result = self.recovery_model.predict(
+            zoomed_roi,
+            classes=[0],
+            conf=self.top_recovery_conf,
+            device=self.device,
+            verbose=False,
+        )[0]
+        if result.boxes is None or len(result.boxes) == 0:
+            return None
+
+        best_player = None
+        best_score = -np.inf
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confs = result.boxes.conf.cpu().numpy()
+        for box, conf in zip(boxes, confs):
+            x1, y1, x2, y2 = box / self.top_recovery_zoom
+            bbox = tuple(int(value) for value in (x1 + offset[0], y1 + offset[1], x2 + offset[0], y2 + offset[1]))
+            center = (int((bbox[0] + bbox[2]) / 2), int((bbox[1] + bbox[3]) / 2))
+            candidate = TrackedPlayer("bottom_player", None, bbox, float(conf), center)
+            if not self._is_valid_bottom_recovery_player(candidate, frame.shape):
+                continue
+            distance = self._center_distance(center, self.last_valid_bottom_player.center)
+            max_distance = max(180.0, (self.last_valid_bottom_player.bbox[2] - self.last_valid_bottom_player.bbox[0]) * 5.0)
+            if distance > max_distance:
+                continue
+            score = float(conf) - distance / 500.0
+            if score > best_score:
+                best_score = score
+                best_player = candidate
+        return best_player
+
+    def _bottom_recovery_roi(self, frame, bbox):
+        frame_h, frame_w = frame.shape[:2]
+        x1, y1, x2, y2 = bbox
+        width, height = x2 - x1, y2 - y1
+        pad_x = max(140, int(width * 4.0))
+        pad_y = max(100, int(height * 2.5))
+        roi_x1 = max(0, x1 - pad_x)
+        roi_y1 = max(0, y1 - pad_y)
+        roi_x2 = min(frame_w, x2 + pad_x)
+        roi_y2 = min(frame_h, y2 + pad_y)
+        return frame[roi_y1:roi_y2, roi_x1:roi_x2], (roi_x1, roi_y1)
+
+    def _is_valid_bottom_recovery_player(self, player, frame_shape):
+        frame_h, frame_w = frame_shape[:2]
+        x1, y1, x2, y2 = player.bbox
+        center_x, _ = player.center
+        return (
+            x2 > x1
+            and y2 > y1
+            and y2 - y1 >= frame_h * 0.06
+            and y2 >= frame_h * 0.18
+            and frame_w * 0.05 <= center_x <= frame_w * 0.98
+        )
+
     def _is_valid_top_player(self, player, frame_shape):
         frame_h, frame_w = frame_shape[:2]
         x1, _, x2, y2 = player.bbox
@@ -879,6 +964,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.pose_model = None
         self.recovery_model = None
         self.last_valid_top_player = None
+        self.last_valid_bottom_player = None
         super().close()
 
     def _extract_pose_detections(self, pose_result):
