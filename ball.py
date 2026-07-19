@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import math
 import os
-from itertools import groupby
 from pathlib import Path
 
 import cv2
@@ -11,6 +9,8 @@ import torch
 
 from BallTrack.model import BallTrackerNet
 from tennis_analyzer.errors import VideoProcessingError
+from tennis_analyzer.pipeline.ball_track import euclidean as _euclidean
+from tennis_analyzer.pipeline.ball_track import postprocess_ball_track
 from tennis_analyzer.pipeline.temporal import TemporalContextBuffer
 
 _TORCH_THREADS_CONFIGURED = False
@@ -34,12 +34,6 @@ def load_model(model_path: Path, device: torch.device, use_compile: bool = False
     model.to(device)
     model.eval()
     return torch.compile(model) if use_compile else model
-
-
-def _euclidean(first, second) -> float:
-    if first[0] is None or second[0] is None:
-        return -1.0
-    return math.hypot(first[0] - second[0], first[1] - second[1])
 
 
 def _postprocess(feature_map, scale: float = 2.0):
@@ -99,66 +93,6 @@ def infer_model_batched(frames, model, device, batch_size: int = 32, use_amp: bo
             flush()
     flush()
     return track, distances
-
-
-def ball_distances(track):
-    if not track:
-        return []
-    return [-1.0, *[_euclidean(current, previous) for previous, current in zip(track, track[1:])]]
-
-
-def remove_outliers(track, distances, max_distance: float = 100):
-    outliers = list(np.where(np.asarray(distances) > max_distance)[0])
-    for index in outliers.copy():
-        next_distance = distances[index + 1] if index + 1 < len(distances) else None
-        if next_distance is not None and (next_distance > max_distance or next_distance == -1):
-            track[index] = (None, None)
-            if index in outliers:
-                outliers.remove(index)
-        elif index > 0 and distances[index - 1] == -1:
-            track[index - 1] = (None, None)
-    return track
-
-
-def split_track(track, max_gap: int = 4, max_distance_gap: float = 80, min_track: int = 5):
-    groups = [
-        (missing, sum(1 for _ in values)) for missing, values in groupby(0 if p[0] is not None else 1 for p in track)
-    ]
-    cursor = 0
-    start = 0
-    result = []
-    for group_index, (missing, length) in enumerate(groups):
-        if missing == 1 and 0 < group_index < len(groups) - 1:
-            distance = _euclidean(track[cursor - 1], track[cursor + length])
-            if length >= max_gap or distance / max(length, 1) > max_distance_gap:
-                if cursor - start > min_track:
-                    result.append([start, cursor])
-                start = cursor + length - 1
-        cursor += length
-    if len(track) - start > min_track:
-        result.append([start, len(track)])
-    return result
-
-
-def interpolation(coordinates):
-    x_values = np.asarray([point[0] if point[0] is not None else np.nan for point in coordinates], dtype=float)
-    y_values = np.asarray([point[1] if point[1] is not None else np.nan for point in coordinates], dtype=float)
-    for values in (x_values, y_values):
-        valid = np.where(~np.isnan(values))[0]
-        missing = np.where(np.isnan(values))[0]
-        if len(valid) >= 2:
-            values[missing] = np.interp(missing, valid, values[valid])
-    return list(zip(x_values, y_values, strict=True))
-
-
-def postprocess_ball_track(raw_track, *, extrapolation=True):
-    """Apply continuity-based filtering once, after all raw chunks are joined."""
-    ball_track = list(raw_track)
-    ball_track = remove_outliers(ball_track, ball_distances(ball_track))
-    if extrapolation:
-        for start, end in split_track(ball_track):
-            ball_track[start:end] = interpolation(ball_track[start:end])
-    return ball_track
 
 
 class BallTracker:
