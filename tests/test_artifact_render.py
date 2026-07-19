@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import cv2
+import pytest
 
+from tennis_analyzer.errors import VideoProcessingError
 from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
 from tennis_analyzer.pipeline.service import render_from_artifact
 from tennis_analyzer.schemas import VisualizationOptions
@@ -46,3 +48,29 @@ def test_render_from_artifact_streams_without_models(sample_video: Path, tmp_pat
     assert rendered.isOpened()
     assert int(rendered.get(cv2.CAP_PROP_FRAME_COUNT)) == frame_count
     rendered.release()
+
+
+def test_render_removes_partial_video_when_artifact_frame_count_is_wrong(sample_video: Path, tmp_path: Path):
+    capture = cv2.VideoCapture(str(sample_video))
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    capture.release()
+    artifact = tmp_path / "analysis.json"
+    write_artifact(
+        artifact,
+        {
+            "frame_count": frame_count + 1,
+            "ball_track": [[None, None] for _ in range(frame_count + 1)],
+            "homographies": [None] * (frame_count + 1),
+            "court_keypoints": [None] * (frame_count + 1),
+            "player_tracks": [[] for _ in range(frame_count + 1)],
+            "bounces": [],
+            "summary": {},
+        },
+    )
+    destination = tmp_path / "render"
+
+    with pytest.raises(VideoProcessingError, match="frame count"):
+        render_from_artifact(sample_video, artifact, destination, VisualizationOptions())
+
+    assert not (destination / ".rendered.mp4").exists()
+    assert not (destination / "rendered.mp4").exists()

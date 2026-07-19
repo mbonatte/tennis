@@ -43,7 +43,12 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     source, destination = Path(source), Path(destination)
     destination.mkdir(parents=True, exist_ok=True)
     metadata = probe_video(source)
+    expected_frames = int(artifact.get("frame_count") or 0)
+    if expected_frames <= 0:
+        raise VideoProcessingError("Analysis artifact contains no frames")
     ball_track = artifact["ball_track"]
+    if len(ball_track) != expected_frames:
+        raise VideoProcessingError("Analysis artifact ball track is not aligned with the source video")
     bounces = set(artifact["bounces"])
     homographies = [
         np.asarray(item, dtype=np.float32) if item is not None else None for item in artifact["homographies"]
@@ -59,10 +64,13 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     if not writer.isOpened():
         raise VideoProcessingError("Could not create render output")
     total = 0
+    frames_complete = False
     try:
         for chunk in iter_frame_chunks(source, 128):
             for offset, frame in enumerate(chunk.frames):
                 index = chunk.start_frame + offset
+                if index >= expected_frames:
+                    raise VideoProcessingError("Source video has more frames than the analysis artifact")
                 annotated = frame.copy()
                 if visual.ball_trail:
                     for age in range(7):
@@ -99,8 +107,13 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                 progress_callback(
                     "rendering", min(99, int(total * 100 / max(1, len(ball_track)))), "Rendering saved analysis"
                 )
+        if total != expected_frames:
+            raise VideoProcessingError("Source video frame count does not match the analysis artifact")
+        frames_complete = True
     finally:
         writer.release()
+        if not frames_complete:
+            raw_output.unlink(missing_ok=True)
     try:
         normalize_video(raw_output, source, output, timeout=max(120, int(metadata.duration_seconds * 5)))
     finally:
