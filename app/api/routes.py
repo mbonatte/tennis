@@ -51,6 +51,7 @@ def _serialize(job: AnalysisJob) -> dict:
         "progress": job.progress,
         "workflow": get_workflow_rows(job.workflow, datetime.now(UTC)),
         "options": job.submitted_options,
+        "renders": [_serialize_render(render, job.public_id) for render in job.renders],
         "video": {
             "duration_seconds": job.video_duration,
             "width": job.video_width,
@@ -66,6 +67,17 @@ def _serialize(job: AnalysisJob) -> dict:
             "status": f"/api/jobs/{job.public_id}",
             "results": f"/api/jobs/{job.public_id}/results",
         },
+    }
+
+
+def _serialize_render(render: RenderOutput, job_id: str) -> dict:
+    return {
+        "id": render.public_id,
+        "status": render.status.value,
+        "stage": render.current_stage,
+        "progress": render.progress,
+        "options": render.visualization_options,
+        "video": f"/jobs/{job_id}/renders/{render.public_id}/video" if render.output_relative_path else None,
     }
 
 
@@ -218,11 +230,14 @@ def create_render(
 @router.post("/jobs/{public_id}/renders")
 def create_render_from_form(
     public_id: str,
-    request: Request,
     ball_trail: bool = Form(False),
     bounce_markers: bool = Form(False),
     frame_number: bool = Form(False),
     court_overlay: bool = Form(False),
+    court_keypoints: bool = Form(False),
+    player_boxes: bool = Form(False),
+    player_poses: bool = Form(False),
+    statistics_overlay: bool = Form(False),
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ):
@@ -230,7 +245,14 @@ def create_render_from_form(
     if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
         raise HTTPException(409, "Analysis must finish before rendering")
     visual = VisualizationOptions(
-        ball_trail=ball_trail, bounce_markers=bounce_markers, frame_number=frame_number, court_overlay=court_overlay
+        ball_trail=ball_trail,
+        bounce_markers=bounce_markers,
+        frame_number=frame_number,
+        court_overlay=court_overlay,
+        court_keypoints=court_keypoints,
+        player_boxes=player_boxes,
+        player_poses=player_poses,
+        statistics_overlay=statistics_overlay,
     )
     render = RenderOutput(analysis=job, status=JobStatus.queued, visualization_options=asdict(visual))
     db.add(render)
@@ -238,6 +260,35 @@ def create_render_from_form(
     enqueue_render(render.public_id, settings)
     db.commit()
     return RedirectResponse(f"/jobs/{public_id}", 303)
+
+
+@router.get("/api/jobs/{public_id}/renders/{render_id}")
+def render_status(public_id: str, render_id: str, db: Session = Depends(get_db)) -> dict:
+    job = _job(db, public_id)
+    render = db.scalar(
+        select(RenderOutput).where(RenderOutput.public_id == render_id, RenderOutput.analysis_id == job.id)
+    )
+    if not render:
+        raise HTTPException(404, "Render not found")
+    return _serialize_render(render, job.public_id)
+
+
+@router.get("/jobs/{public_id}/renders/{render_id}/video")
+def render_video_file(
+    public_id: str,
+    render_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    job = _job(db, public_id)
+    render = db.scalar(
+        select(RenderOutput).where(RenderOutput.public_id == render_id, RenderOutput.analysis_id == job.id)
+    )
+    if not render or render.status != JobStatus.completed or not render.output_relative_path:
+        raise HTTPException(404, "Completed render not found")
+    path = resolve_job_file(settings.data_root, render.output_relative_path)
+    return _range_response(path, request.headers.get("range"), "video/mp4")
 
 
 @router.get("/api/jobs/{public_id}")

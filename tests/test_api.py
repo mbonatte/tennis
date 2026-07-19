@@ -3,7 +3,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
-from app.models import AnalysisJob, JobStatus
+from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
 
 
@@ -88,3 +88,27 @@ def test_failed_job_exposes_safe_message_only(client, sample_video: Path):
     body = client.get(f"/api/jobs/{public_id}").json()
     assert body["error"]["message"] == "A required model is unavailable"
     assert "traceback" not in str(body)
+
+
+def test_completed_analysis_can_queue_independent_render(client, sample_video: Path, monkeypatch):
+    public_id = upload(client, sample_video).json()["id"]
+    monkeypatch.setattr("app.api.routes.enqueue_render", lambda public_id, settings: f"render-{public_id}")
+    with SessionLocal() as db:
+        job = db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id))
+        transition(job, JobStatus.running)
+        transition(job, JobStatus.completed)
+        job.analysis_artifact_relative_path = f"jobs/{public_id}/output/analysis-artifact.json"
+        db.commit()
+
+    response = client.post(
+        f"/jobs/{public_id}/renders",
+        data={"ball_trail": "true", "player_boxes": "true"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with SessionLocal() as db:
+        render = db.scalar(select(RenderOutput))
+        assert render.status == JobStatus.queued
+        assert render.visualization_options["ball_trail"] is True
+        assert render.visualization_options["player_boxes"] is True
