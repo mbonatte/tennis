@@ -112,3 +112,24 @@ def test_completed_analysis_can_queue_independent_render(client, sample_video: P
         assert render.status == JobStatus.queued
         assert render.visualization_options["ball_trail"] is True
         assert render.visualization_options["player_boxes"] is True
+
+
+def test_analysis_with_active_render_cannot_be_deleted(client, sample_video: Path):
+    public_id = upload(client, sample_video).json()["id"]
+    with SessionLocal() as db:
+        job = db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id))
+        transition(job, JobStatus.running)
+        transition(job, JobStatus.completed)
+        job.renders.append(
+            RenderOutput(
+                status=JobStatus.running,
+                visualization_options={"frame_number": True},
+            )
+        )
+        db.commit()
+
+    response = client.delete(f"/api/jobs/{public_id}")
+
+    assert response.status_code == 409
+    with SessionLocal() as db:
+        assert db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id)) is not None

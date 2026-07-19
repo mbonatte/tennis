@@ -336,6 +336,8 @@ def delete_job(
     job = _job(db, public_id)
     if job.status in {JobStatus.queued, JobStatus.running}:
         raise HTTPException(409, "Cancel the running analysis before deleting it")
+    if any(render.status in {JobStatus.queued, JobStatus.running} for render in job.renders):
+        raise HTTPException(409, "Wait for queued or running renders before deleting the analysis")
     db.delete(job)
     db.commit()
     delete_job_files(settings.data_root, public_id)
