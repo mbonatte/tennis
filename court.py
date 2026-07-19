@@ -128,6 +128,36 @@ def draw_court(
     return output_frames
 
 
+def draw_court_overlay_in_place(frame, homography_matrix, ball_point=None, bounce=False, players=None):
+    """Draw only the court minimap onto an already-owned render frame."""
+    minimap = get_court_img().copy()
+    if homography_matrix is not None:
+        if _has_point(ball_point):
+            _draw_projected_point(minimap, homography_matrix, ball_point, color=(0, 255, 255), radius=30)
+            if bounce:
+                _draw_projected_point(minimap, homography_matrix, ball_point, color=(0, 165, 255), radius=60)
+        for player in players or []:
+            is_top_player = player.role == "top_player"
+            _draw_projected_point(
+                minimap,
+                homography_matrix,
+                _player_foot_point(player),
+                color=(255, 0, 0) if is_top_player else (0, 255, 0),
+                radius=36,
+                label="T" if is_top_player else "B",
+            )
+
+    frame_height, frame_width = frame.shape[:2]
+    width = min(166, max(60, frame_width // 4))
+    height = min(350, max(100, frame_height - 60))
+    minimap = cv2.resize(minimap, (width, height))
+    top = max(0, min(30, frame_height - height))
+    right = max(width, frame_width - 30)
+    left = right - width
+    frame[top : top + height, left:right, :] = minimap
+    return frame
+
+
 def _has_point(point):
     return point is not None and point[0] is not None and point[1] is not None
 

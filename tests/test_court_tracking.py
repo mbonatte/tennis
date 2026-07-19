@@ -42,3 +42,15 @@ def test_court_tracker_rejects_misaligned_results():
 
     with pytest.raises(Exception, match="unexpected number"):
         tracker.process_chunk(_frames(2))
+
+
+def test_court_overlay_draws_in_place_and_reuses_cached_template():
+    court.get_court_img.cache_clear()
+    frame = np.zeros((240, 320, 3), dtype=np.uint8)
+
+    result = court.draw_court_overlay_in_place(frame, None)
+    court.draw_court_overlay_in_place(frame, None)
+
+    assert result is frame
+    assert court.get_court_img.cache_info().misses == 1
+    assert court.get_court_img.cache_info().hits == 1

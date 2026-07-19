@@ -299,8 +299,8 @@ class BoxPlayerTracker(BasePlayerTracker):
             center=det["center"],
         )
 
-    def draw(self, frame, players):
-        annotated = frame.copy()
+    def draw(self, frame, players, *, copy_frame=True):
+        annotated = frame.copy() if copy_frame else frame
 
         for player in players:
             x1, y1, x2, y2 = player.bbox
@@ -483,8 +483,8 @@ class PosePlayerTracker(BasePlayerTracker):
             keypoints_conf=det["keypoints_conf"],
         )
 
-    def draw(self, frame, players):
-        annotated = frame.copy()
+    def draw(self, frame, players, *, copy_frame=True):
+        annotated = frame.copy() if copy_frame else frame
 
         for player in players:
             self._draw_skeleton(annotated, player)
@@ -913,8 +913,8 @@ class HybridPlayerTracker(BoxPlayerTracker):
 
         return inter_area / union
 
-    def draw(self, frame, players):
-        annotated = frame.copy()
+    def draw(self, frame, players, *, copy_frame=True):
+        annotated = frame.copy() if copy_frame else frame
 
         for player in players:
             self._draw_box(annotated, player)

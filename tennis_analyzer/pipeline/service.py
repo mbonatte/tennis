@@ -300,16 +300,15 @@ def analyze_video(
                             annotated, str(number), (x + 6, y - 6), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1
                         )
                 if visual.court_overlay and index < len(homographies):
-                    from court import draw_court
+                    from court import draw_court_overlay_in_place
 
-                    annotated = draw_court(
-                        [annotated],
-                        [homographies[index]],
-                        [keypoints[index]],
-                        ball_track=[ball_track[index]],
-                        bounces={0} if index in bounces else set(),
-                        player_tracks=[player_tracks[index]] if index < len(player_tracks) else None,
-                    )[0]
+                    annotated = draw_court_overlay_in_place(
+                        annotated,
+                        homographies[index],
+                        ball_point=ball_track[index],
+                        bounce=index in bounces,
+                        players=player_tracks[index] if index < len(player_tracks) else None,
+                    )
                 if visual.statistics_overlay and stats is not None:
                     from analysis import draw_stats_overlay
 

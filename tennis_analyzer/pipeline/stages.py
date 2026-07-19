@@ -28,7 +28,7 @@ class PlayerStage:
         return tracks
 
     def draw(self, frame, tracks):
-        return self.tracker.draw(frame, tracks)
+        return self.tracker.draw(frame, tracks, copy_frame=False)
 
     def close(self) -> None:
         self.tracker.close()
