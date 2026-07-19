@@ -6,6 +6,8 @@
   {% if rows %}
   <div class="workflow-heading"><div><h2>Workflow</h2><p>Stages run in order. Timing includes model setup and work within each stage.</p></div><span>{{ rows|selectattr('status', 'equalto', 'completed')|list|length }}/{{ rows|length }} complete</span></div>
   <div class="table-wrap"><table class="workflow-table"><thead><tr><th>Stage</th><th>Status</th><th>Stage progress</th><th>Elapsed</th></tr></thead><tbody>{% for row in rows %}<tr class="workflow-{{ row.status }}"><td><strong>{{ row.label }}</strong>{% if row.option_labels %}<div class="workflow-options">{% for option in row.option_labels %}<span>{{ option }}</span>{% endfor %}</div>{% endif %}</td><td><span class="workflow-state">{{ row.status }}</span></td><td><div class="stage-progress"><progress max="100" value="{{ row.progress }}">{{ row.progress }}%</progress><span>{{ row.progress }}%</span></div></td><td>{{ format_duration(row.duration_seconds) }}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}
+  <p class="notice">Detailed stage timing is available for jobs created after this update.</p>
   {% endif %}
   {% if job.error_message %}<div class="error"><strong>Processing failed</strong><p>{{ job.error_message }}</p></div>{% endif %}
   {% if job.status.value in ['queued', 'running'] %}<form action="/jobs/{{ job.public_id }}/cancel" method="post"><button class="secondary">Cancel</button></form>{% endif %}
