@@ -3,6 +3,7 @@ from typing import Optional, Tuple, List
 
 import cv2
 import numpy as np
+import torch
 from ultralytics import YOLO
 
 
@@ -51,9 +52,13 @@ class BasePlayerTracker:
         conf: float = 0.5,
         tracker: str = "bytetrack.yaml",
         min_box_area: int = 500,
+        device: str = "cpu",
     ):
+        self.device = device
         self.model = YOLO(model_path)
         self.model.overrides["verbose"] = False
+        self.model.to(device)
+        self.model.model.eval()
 
         self.conf = conf
         self.tracker = tracker
@@ -72,6 +77,7 @@ class BasePlayerTracker:
             classes=[0],          # person class
             conf=self.conf,
             tracker=self.tracker,
+            device=self.device,
             verbose=False,
         )
 
@@ -94,6 +100,13 @@ class BasePlayerTracker:
             raw_results.append(result)
 
         return all_players, raw_results
+
+    def close(self):
+        self.model = None
+        self.last_top_player = None
+        self.last_bottom_player = None
+        if str(self.device).startswith("cuda"):
+            torch.cuda.empty_cache()
 
     def annotate_frames(self, frames, player_tracks):
         """
@@ -264,12 +277,14 @@ class BoxPlayerTracker(BasePlayerTracker):
         conf: float = 0.5,
         tracker: str = "bytetrack.yaml",
         min_box_area: int = 500,
+        device: str = "cpu",
     ):
         super().__init__(
             model_path=model_path,
             conf=conf,
             tracker=tracker,
             min_box_area=min_box_area,
+            device=device,
         )
 
     def _extract_detections(self, result):
@@ -371,12 +386,14 @@ class PosePlayerTracker(BasePlayerTracker):
         tracker: str = "bytetrack.yaml",
         min_box_area: int = 500,
         keypoint_conf_threshold: float = 0.3,
+        device: str = "cpu",
     ):
         super().__init__(
             model_path=model_path,
             conf=conf,
             tracker=tracker,
             min_box_area=min_box_area,
+            device=device,
         )
 
         self.keypoint_conf_threshold = keypoint_conf_threshold
@@ -589,18 +606,24 @@ class HybridPlayerTracker(BoxPlayerTracker):
         max_pose_match_distance: float = 120.0,
         top_recovery_conf: float = 0.15,
         top_recovery_zoom: float = 2.0,
+        device: str = "cpu",
     ):
         super().__init__(
             model_path=box_model_path,
             conf=conf,
             tracker=tracker,
             min_box_area=min_box_area,
+            device=device,
         )
 
         self.pose_model = YOLO(pose_model_path)
         self.pose_model.overrides["verbose"] = False
+        self.pose_model.to(device)
+        self.pose_model.model.eval()
         self.recovery_model = YOLO(box_model_path)
         self.recovery_model.overrides["verbose"] = False
+        self.recovery_model.to(device)
+        self.recovery_model.model.eval()
 
         self.pose_conf = pose_conf
         self.keypoint_conf_threshold = keypoint_conf_threshold
@@ -609,6 +632,8 @@ class HybridPlayerTracker(BoxPlayerTracker):
         self.top_recovery_zoom = top_recovery_zoom
         self.last_valid_top_player = None
 
+    @torch.inference_mode()
+    @torch.inference_mode()
     def track_frame(self, frame):
         """
         1. Track players with box model.
@@ -692,6 +717,7 @@ class HybridPlayerTracker(BoxPlayerTracker):
             zoomed_roi,
             classes=[0],
             conf=self.top_recovery_conf,
+            device=self.device,
             verbose=False,
         )
         result = results[0]
@@ -774,10 +800,17 @@ class HybridPlayerTracker(BoxPlayerTracker):
             frame,
             classes=[0],
             conf=self.pose_conf,
+            device=self.device,
             verbose=False,
         )
 
         return results[0]
+
+    def close(self):
+        self.pose_model = None
+        self.recovery_model = None
+        self.last_valid_top_player = None
+        super().close()
 
     def _extract_pose_detections(self, pose_result):
         detections = []
