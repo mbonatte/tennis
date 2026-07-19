@@ -22,7 +22,7 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db
 from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
-from app.services.queue import enqueue_analysis, enqueue_render
+from app.services.queue import enqueue_analysis, enqueue_render, enqueue_scene_scan
 from app.services.storage import delete_job_files, resolve_job_file, safe_job_dir, sanitize_filename, stream_upload
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
@@ -198,7 +198,7 @@ async def create_job(
     db.flush()
     transition(job, JobStatus.queued)
     try:
-        job.queue_job_id = enqueue_analysis(public_id, settings)
+        job.queue_job_id = enqueue_scene_scan(public_id, settings)
         db.commit()
     except Exception as exc:
         logger.exception("Could not enqueue analysis job %s", public_id)
@@ -219,6 +219,59 @@ def job_page(public_id: str, request: Request, db: Session = Depends(get_db)):
     job = _job(db, public_id)
     result = _load_result(job, get_settings()) if job.status == JobStatus.completed else None
     return templates.TemplateResponse(request, "job.html", {"job": job, "result": result})
+
+
+@router.post("/jobs/{public_id}/scenes/analyze")
+def analyze_selected_scenes(
+    public_id: str,
+    scene_ids: list[str] = Form(default=[]),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    parent = _job(db, public_id)
+    review = dict((parent.submitted_options or {}).get("scene_review") or {})
+    scenes = list(review.get("scenes") or [])
+    if parent.status != JobStatus.completed or parent.current_stage != "scene_review" or not scenes:
+        raise HTTPException(409, "Scene review must finish before creating scene analyses")
+    chosen = set(scene_ids)
+    children = list(review.get("children") or [])
+    known_scene_ids = {item.get("scene_id") for item in children}
+    for scene in scenes:
+        scene["selected"] = scene["id"] in chosen
+        if scene["id"] not in chosen or scene["id"] in known_scene_ids:
+            continue
+        child_id = str(uuid.uuid4())
+        analysis_options = dict(parent.submitted_options["analysis"])
+        visual_options = dict(parent.submitted_options["visualization"])
+        child = AnalysisJob(
+            public_id=child_id,
+            original_filename=f"{parent.original_filename} — {scene['id']}",
+            stored_filename=parent.stored_filename,
+            input_relative_path=parent.input_relative_path,
+            input_size=parent.input_size,
+            submitted_options={
+                "analysis": analysis_options,
+                "visualization": visual_options,
+                "scene_source": {"parent_id": parent.public_id, **scene},
+            },
+            workflow=create_workflow(AnalysisOptions(**analysis_options), VisualizationOptions(**visual_options), include_render=False),
+            video_duration=(scene["end_frame"] - scene["start_frame"] + 1) / max(1, parent.video_duration and (review["frame_count"] / parent.video_duration)),
+            video_width=parent.video_width,
+            video_height=parent.video_height,
+            video_codec=parent.video_codec,
+        )
+        db.add(child)
+        db.flush()
+        transition(child, JobStatus.queued)
+        child.queue_job_id = enqueue_analysis(child_id, settings)
+        children.append({"scene_id": scene["id"], "job_id": child_id})
+    review["scenes"] = scenes
+    review["children"] = children
+    parent_options = dict(parent.submitted_options)
+    parent_options["scene_review"] = review
+    parent.submitted_options = parent_options
+    db.commit()
+    return RedirectResponse(f"/jobs/{public_id}", status_code=303)
 
 
 @router.get("/jobs/{public_id}/status", response_class=HTMLResponse)
