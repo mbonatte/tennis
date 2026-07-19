@@ -5,6 +5,7 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models import AnalysisJob, JobStatus, RenderOutput
 from app.services.job_state import transition
+from tennis_analyzer.pipeline.artifact import write_artifact
 
 
 def upload(client, path: Path):
@@ -140,3 +141,41 @@ def test_analysis_with_active_render_cannot_be_deleted(client, sample_video: Pat
     assert response.status_code == 409
     with SessionLocal() as db:
         assert db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id)) is not None
+
+
+def test_completed_analysis_supports_reusable_court_calibration(client, sample_video: Path):
+    public_id = upload(client, sample_video).json()["id"]
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    with SessionLocal() as db:
+        job = db.scalar(select(AnalysisJob).where(AnalysisJob.public_id == public_id))
+        transition(job, JobStatus.running)
+        transition(job, JobStatus.completed)
+        artifact = settings.data_root / "jobs" / public_id / "output" / "analysis-artifact.json"
+        write_artifact(
+            artifact,
+            {
+                "frame_count": 1,
+                "court_keypoints": [
+                    [[[10, 10]], [[300, 10]], [[10, 220]], [[300, 220]]],
+                ],
+            },
+        )
+        job.analysis_artifact_relative_path = str(artifact.relative_to(settings.data_root))
+        db.commit()
+
+    suggestion = client.get(f"/api/jobs/{public_id}/court-calibration?frame_index=0")
+    assert suggestion.status_code == 200
+    assert suggestion.json()["image_points"] == [[10.0, 10.0], [300.0, 10.0], [300.0, 220.0], [10.0, 220.0]]
+    preview = client.get(f"/jobs/{public_id}/court-preview.jpg?frame_index=0")
+    assert preview.status_code == 200 and preview.headers["content-type"] == "image/jpeg"
+
+    saved = client.put(
+        f"/api/jobs/{public_id}/court-calibration",
+        json={"frame_index": 0, "image_points": [[10, 10], [300, 10], [300, 220], [10, 220]]},
+    )
+    assert saved.status_code == 200 and saved.json()["mode"] == "static"
+    assert client.get(f"/api/jobs/{public_id}").json()["court_calibration"]["frame_index"] == 0
+    assert client.delete(f"/api/jobs/{public_id}/court-calibration").status_code == 204
+    assert client.get(f"/api/jobs/{public_id}").json()["court_calibration"] is None

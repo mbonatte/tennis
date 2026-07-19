@@ -7,9 +7,11 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 
+import cv2
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from redis import Redis
 from redis.exceptions import RedisError
 from sqlalchemy import select, text
@@ -25,6 +27,13 @@ from app.services.storage import delete_job_files, resolve_job_file, safe_job_di
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
 from tennis_analyzer.errors import InvalidVideoError
+from tennis_analyzer.pipeline.artifact import read_artifact
+from tennis_analyzer.pipeline.court_calibration import (
+    CORNER_LABELS,
+    CourtCalibrationError,
+    create_static_calibration,
+    suggested_outer_corners,
+)
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
 from tennis_analyzer.video import probe_video, validate_video
 
@@ -33,6 +42,11 @@ templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["workflow_rows"] = lambda workflow: get_workflow_rows(workflow, datetime.now(UTC))
 templates.env.globals["format_duration"] = format_duration
 logger = logging.getLogger(__name__)
+
+
+class CourtCalibrationPayload(BaseModel):
+    frame_index: int = Field(ge=0)
+    image_points: list[list[float]]
 
 
 def _job(db: Session, public_id: str) -> AnalysisJob:
@@ -52,6 +66,7 @@ def _serialize(job: AnalysisJob) -> dict:
         "workflow": get_workflow_rows(job.workflow, datetime.now(UTC)),
         "options": job.submitted_options,
         "renders": [_serialize_render(render, job.public_id) for render in job.renders],
+        "court_calibration": job.court_calibration,
         "video": {
             "duration_seconds": job.video_duration,
             "width": job.video_width,
@@ -208,6 +223,94 @@ def job_page(public_id: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/jobs/{public_id}/status", response_class=HTMLResponse)
 def job_status_fragment(public_id: str, request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse(request, "_job_status.html", {"job": _job(db, public_id)})
+
+
+def _calibratable_job(db: Session, public_id: str) -> AnalysisJob:
+    job = _job(db, public_id)
+    if job.status != JobStatus.completed or not job.analysis_artifact_relative_path:
+        raise HTTPException(409, "Analysis must finish before court calibration")
+    return job
+
+
+@router.get("/api/jobs/{public_id}/court-calibration")
+def court_calibration_data(
+    public_id: str,
+    frame_index: int = 0,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    if frame_index < 0:
+        raise HTTPException(422, "Calibration frame must be non-negative")
+    try:
+        artifact = read_artifact(resolve_job_file(settings.data_root, job.analysis_artifact_relative_path))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, "Saved analysis artifact is unavailable") from exc
+    keypoints = artifact.get("court_keypoints", [])
+    suggested = suggested_outer_corners(keypoints[frame_index]) if frame_index < len(keypoints) else None
+    calibration = job.court_calibration
+    points = (
+        calibration.get("image_points") if calibration and calibration.get("frame_index") == frame_index else suggested
+    )
+    return {
+        "frame_index": frame_index,
+        "image_points": points,
+        "suggested_points": suggested,
+        "corner_labels": CORNER_LABELS,
+        "calibration": calibration,
+    }
+
+
+@router.get("/jobs/{public_id}/court-preview.jpg")
+def court_preview(
+    public_id: str,
+    frame_index: int = 0,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    job = _calibratable_job(db, public_id)
+    if frame_index < 0:
+        raise HTTPException(422, "Calibration frame must be non-negative")
+    capture = cv2.VideoCapture(str(resolve_job_file(settings.data_root, job.input_relative_path)))
+    try:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+        ok, frame = capture.read()
+    finally:
+        capture.release()
+    if not ok:
+        raise HTTPException(422, "Requested calibration frame is not readable")
+    ok, encoded = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if not ok:
+        raise HTTPException(500, "Could not prepare the calibration preview")
+    return Response(encoded.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.put("/api/jobs/{public_id}/court-calibration")
+def save_court_calibration(
+    public_id: str,
+    payload: CourtCalibrationPayload,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    try:
+        calibration = create_static_calibration(payload.frame_index, payload.image_points)
+    except CourtCalibrationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    for x, y in calibration["image_points"]:
+        if not (0 <= x < (job.video_width or 0) and 0 <= y < (job.video_height or 0)):
+            raise HTTPException(422, "Court-corner points must be within the source frame")
+    job.court_calibration = calibration
+    db.commit()
+    return calibration
+
+
+@router.delete("/api/jobs/{public_id}/court-calibration", status_code=204)
+def clear_court_calibration(public_id: str, db: Session = Depends(get_db)):
+    job = _calibratable_job(db, public_id)
+    job.court_calibration = None
+    db.commit()
+    return Response(status_code=204)
 
 
 @router.post("/api/jobs/{public_id}/renders")

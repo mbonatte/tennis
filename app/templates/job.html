@@ -7,6 +7,7 @@
 <section class="card"><h2>Source video</h2><dl><dt>Resolution</dt><dd>{{ job.video_width }} × {{ job.video_height }}</dd><dt>Duration</dt><dd>{{ '%.1f'|format(job.video_duration) }} seconds</dd><dt>Codec</dt><dd>{{ job.video_codec }}</dd><dt>Created</dt><dd>{{ job.created_at }}</dd>{% if job.completed_at %}<dt>Analyzed</dt><dd>{{ job.completed_at }}</dd>{% endif %}</dl></section>
 {% if job.status.value == 'completed' and result %}
 {% if job.analysis_artifact_relative_path %}
+<section class="card" id="court-calibration"><h2>Improve court detection</h2><p class="notice">Adjust the four outer doubles-court corners on one representative frame. This correction is applied to future renders without running models again.</p><div class="columns"><label>Reference frame <input id="calibration-frame" type="number" min="0" value="{{ job.court_calibration.get('frame_index', 0) if job.court_calibration else 0 }}"></label><div class="actions"><button id="load-calibration-frame" type="button" class="secondary">Load frame</button><button id="save-court-calibration" type="button">Save correction</button>{% if job.court_calibration %}<button id="clear-court-calibration" type="button" class="danger">Remove correction</button>{% endif %}</div></div><canvas id="court-calibration-canvas" style="display:block;max-width:100%;height:auto;border:1px solid #778;margin-top:1rem;cursor:crosshair"></canvas><ol><li>Far left doubles corner</li><li>Far right doubles corner</li><li>Near right doubles corner</li><li>Near left doubles corner</li></ol><p id="court-calibration-status" class="notice">The model's detected corners are loaded first. Drag a point to correct it; click to add a missing point.</p></section>
 <section class="card"><h2>Create a render</h2><p class="notice">Uses saved analysis data. Models are not run again, so you can create multiple variants.</p><form action="/jobs/{{ job.public_id }}/renders" method="post"><div class="columns"><fieldset><legend>Tracking overlays</legend><label><input type="checkbox" name="ball_trail" value="true"> Ball trail</label><label><input type="checkbox" name="bounce_markers" value="true"> Bounce markers</label><label><input type="checkbox" name="player_boxes" value="true"> Player boxes</label><label><input type="checkbox" name="player_poses" value="true"> Player poses</label><label>Top-player name <input name="top_player_label" value="Top player" maxlength="40"></label><label>Bottom-player name <input name="bottom_player_label" value="Bottom player" maxlength="40"></label></fieldset><fieldset><legend>Court and information</legend><label><input type="checkbox" name="court_overlay" value="true"> Court minimap</label><label><input type="checkbox" name="court_keypoints" value="true"> Court keypoints</label><label><input type="checkbox" name="statistics_overlay" value="true"> Statistics</label><label><input type="checkbox" name="frame_number" value="true"> Frame number</label></fieldset></div><button type="submit">Create render</button></form></section>
 {% else %}<section class="card"><p class="notice">This older analysis has no reusable artifact. Submit the source video again to create changeable renders.</p></section>{% endif %}
 {% if job.renders %}<section class="card"><h2>Render outputs</h2><div class="table-wrap"><table><thead><tr><th>Created</th><th>Options</th><th>Status</th><th>Progress</th><th></th></tr></thead><tbody>{% for render in job.renders|sort(attribute='created_at', reverse=true) %}<tr><td>{{ render.created_at }}</td><td><div class="chips">{% for name, value in render.visualization_options.items() %}{% if name in ['top_player_label', 'bottom_player_label'] and render.visualization_options.get('player_boxes') %}<span>{{ name.replace('_label', '').replace('_', ' ') }}: {{ value }}</span>{% elif value and name not in ['top_player_label', 'bottom_player_label'] %}<span>{{ name.replace('_', ' ') }}</span>{% endif %}{% endfor %}</div></td><td><span class="badge">{{ render.status.value }}</span> {{ render.current_stage.replace('_', ' ') }}{% if render.error_message %}<div class="error">{{ render.error_message }}</div>{% endif %}</td><td>{{ render.progress }}%</td><td>{% if render.status.value == 'completed' %}<a class="button secondary" href="/jobs/{{ job.public_id }}/renders/{{ render.public_id }}/video">View</a>{% endif %}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
@@ -17,4 +18,64 @@
 {% endif %}
 {% if job.status.value not in ['queued', 'running'] %}<form class="danger-zone" action="/jobs/{{ job.public_id }}/delete" method="post" onsubmit="return confirm('Delete this analysis and all of its renders?')"><button class="danger">Delete analysis</button></form>{% endif %}
 {% endblock %}
-{% block scripts %}{% set active_renders = job.renders|selectattr('status.value', 'in', ['queued', 'running'])|list %}{% if job.status.value in ['queued', 'running'] or active_renders %}<script>setTimeout(() => location.reload(), 3000);</script>{% endif %}{% endblock %}
+{% block scripts %}{% if job.status.value == 'completed' and job.analysis_artifact_relative_path %}<script>
+(() => {
+  const jobId = "{{ job.public_id }}";
+  const canvas = document.getElementById("court-calibration-canvas");
+  const context = canvas.getContext("2d");
+  const frameInput = document.getElementById("calibration-frame");
+  const status = document.getElementById("court-calibration-status");
+  const image = new Image();
+  let points = [null, null, null, null];
+  let labels = [];
+  let dragging = -1;
+
+  const pointFromEvent = (event) => {
+    const rect = canvas.getBoundingClientRect();
+    return [(event.clientX - rect.left) * canvas.width / rect.width, (event.clientY - rect.top) * canvas.height / rect.height];
+  };
+  const draw = () => {
+    if (!image.complete || !image.naturalWidth) return;
+    context.drawImage(image, 0, 0);
+    points.forEach((point, index) => {
+      if (!point) return;
+      context.beginPath(); context.arc(point[0], point[1], 10, 0, Math.PI * 2);
+      context.fillStyle = ["#e53935", "#1e88e5", "#43a047", "#fb8c00"][index]; context.fill();
+      context.fillStyle = "white"; context.font = "bold 14px sans-serif"; context.fillText(String(index + 1), point[0] - 4, point[1] + 5);
+      context.fillStyle = "white"; context.fillText(labels[index] || `Point ${index + 1}`, point[0] + 13, point[1] - 12);
+    });
+  };
+  const load = async () => {
+    const frame = Math.max(0, Number.parseInt(frameInput.value || "0", 10) || 0);
+    frameInput.value = frame;
+    const response = await fetch(`/api/jobs/${jobId}/court-calibration?frame_index=${frame}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Could not load court data");
+    labels = data.corner_labels;
+    points = data.image_points || [null, null, null, null];
+    image.onload = () => { canvas.width = image.naturalWidth; canvas.height = image.naturalHeight; draw(); };
+    image.src = `/jobs/${jobId}/court-preview.jpg?frame_index=${frame}&cache=${Date.now()}`;
+    status.textContent = data.image_points ? "Drag the suggested points to correct them, then save." : "Click the four court corners in the listed order, then save.";
+  };
+  canvas.addEventListener("pointerdown", (event) => {
+    const point = pointFromEvent(event);
+    const closest = points.findIndex((candidate) => candidate && Math.hypot(candidate[0] - point[0], candidate[1] - point[1]) < 22);
+    dragging = closest >= 0 ? closest : points.findIndex((candidate) => !candidate);
+    if (dragging < 0) dragging = 0;
+    points[dragging] = point; draw(); canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", (event) => { if (dragging >= 0) { points[dragging] = pointFromEvent(event); draw(); } });
+  canvas.addEventListener("pointerup", () => { dragging = -1; });
+  document.getElementById("load-calibration-frame").addEventListener("click", () => load().catch((error) => { status.textContent = error.message; }));
+  document.getElementById("save-court-calibration").addEventListener("click", async () => {
+    if (points.some((point) => !point)) { status.textContent = "Click all four court corners before saving."; return; }
+    const response = await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "PUT", headers: {"Content-Type": "application/json"}, body: JSON.stringify({frame_index: Number(frameInput.value), image_points: points})});
+    const data = await response.json();
+    status.textContent = response.ok ? "Court correction saved. New renders will use it." : (data.detail || "Could not save court correction.");
+    if (response.ok) window.setTimeout(() => location.reload(), 800);
+  });
+  const clear = document.getElementById("clear-court-calibration");
+  if (clear) clear.addEventListener("click", async () => { await fetch(`/api/jobs/${jobId}/court-calibration`, {method: "DELETE"}); location.reload(); });
+  load().catch((error) => { status.textContent = error.message; });
+})();
+</script>{% endif %}{% set active_renders = job.renders|selectattr('status.value', 'in', ['queued', 'running'])|list %}{% if job.status.value in ['queued', 'running'] or active_renders %}<script>setTimeout(() => location.reload(), 3000);</script>{% endif %}{% endblock %}
