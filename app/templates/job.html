@@ -261,28 +261,23 @@
         <div class="section-title">
           <div>
             <h2>Player identification</h2>
-            <p>Name the players once. The names are saved with the analysis and reused in every render.</p>
+            <p>Classify which person is which across multiple frames, then name them.</p>
           </div>
         </div>
-        <div class="player-id-grid" id="player-id-grid">
-          <div class="player-id-card">
-            <img id="top-player-crop" class="player-crop" src="/jobs/{{ job.public_id }}/player-crops/top_player.jpg" alt="Far player" loading="lazy">
-            <div class="player-id-field">
-              <label for="top-player-name">Far player</label>
-              <input type="text" id="top-player-name" class="player-name-input" maxlength="40" placeholder="e.g. Nadal">
-            </div>
+        <div class="player-id-grid" id="player-id-grid"></div>
+        <div class="player-id-names">
+          <div class="player-id-field">
+            <label for="player-one-name">Player 1 name</label>
+            <input type="text" id="player-one-name" class="player-name-input" maxlength="40" placeholder="e.g. Nadal">
           </div>
-          <div class="player-id-card">
-            <img id="bottom-player-crop" class="player-crop" src="/jobs/{{ job.public_id }}/player-crops/bottom_player.jpg" alt="Near player" loading="lazy">
-            <div class="player-id-field">
-              <label for="bottom-player-name">Near player</label>
-              <input type="text" id="bottom-player-name" class="player-name-input" maxlength="40" placeholder="e.g. Federer">
-            </div>
+          <div class="player-id-field">
+            <label for="player-two-name">Player 2 name</label>
+            <input type="text" id="player-two-name" class="player-name-input" maxlength="40" placeholder="e.g. Federer">
           </div>
         </div>
         <div class="form-footer">
           <span id="player-id-status" class="notice"></span>
-          <button id="save-player-names" type="button">Save player names</button>
+          <button id="save-player-names" type="button">Save player identification</button>
         </div>
       </section>
 
@@ -736,33 +731,114 @@ function selectPointForRender(startFrame, endFrame) {
   document.getElementById("render-studio")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-(async function loadPlayerNames() {
-  const topInput = document.getElementById("top-player-name");
-  const bottomInput = document.getElementById("bottom-player-name");
+(async function loadPlayerSamples() {
+  const grid = document.getElementById("player-id-grid");
+  const player1Input = document.getElementById("player-one-name");
+  const player2Input = document.getElementById("player-two-name");
   const renderTop = document.getElementById("render-top-label");
   const renderBottom = document.getElementById("render-bottom-label");
-  if (!topInput && !bottomInput) return;
+  if (!grid) return;
   try {
     const resp = await fetch("/api/jobs/{{ job.public_id }}/player-names");
     if (!resp.ok) throw new Error();
     const data = await resp.json();
     const names = data.player_names || {};
-    if (names.top_player) {
-      if (topInput) topInput.value = names.top_player;
-      if (renderTop) renderTop.value = names.top_player;
+    const samples = data.player_appearance_samples || [];
+    const roles = ["top_player", "bottom_player"];
+    const labels = { top_player: [], bottom_player: [] };
+
+    // Build the grid from samples
+    for (let s = 0; s < Math.min(samples.length || 1, 5); s++) {
+      for (const role of roles) {
+        const url = `/jobs/{{ job.public_id }}/player-crops/${role}.jpg?sample=${s}`;
+        labels[role].push({ sample: s, url, selected: null });
+      }
     }
-    if (names.bottom_player) {
-      if (bottomInput) bottomInput.value = names.bottom_player;
+    // Fallback: if no samples, use the default single crop (sample=0 falls back to player_appearance)
+    if (!samples.length) {
+      for (const role of roles) {
+        labels[role].push({ sample: 0, url: `/jobs/{{ job.public_id }}/player-crops/${role}.jpg`, selected: null });
+      }
+    }
+
+    // Render grid cells
+    const allItems = [];
+    for (let s = 0; s < labels.top_player.length; s++) {
+      allItems.push({ role: "top_player", ...labels.top_player[s] });
+      allItems.push({ role: "bottom_player", ...labels.bottom_player[s] });
+    }
+    // Shuffle so the user cannot rely on position hints
+    for (let i = allItems.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [allItems[i], allItems[j]] = [allItems[j], allItems[i]];
+    }
+
+    for (const item of allItems) {
+      const card = document.createElement("div");
+      card.className = "player-id-card";
+      card.dataset.role = item.role;
+      card.dataset.sample = item.sample;
+      card.innerHTML = `
+        <img class="player-crop" src="${item.url}" alt="" loading="lazy">
+        <div class="player-id-toggle">
+          <button class="tag-btn tag-p1" data-tag="1">Player 1</button>
+          <button class="tag-btn tag-p2" data-tag="2">Player 2</button>
+        </div>
+      `;
+      card.querySelectorAll(".tag-btn").forEach(btn => {
+        btn.addEventListener("click", () => {
+          card.querySelectorAll(".tag-btn").forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          card.dataset.selected = btn.dataset.tag;
+        });
+      });
+      grid.appendChild(card);
+    }
+
+    // Pre-fill name fields if previously saved
+    if (names.top_player && names.bottom_player) {
+      // Determine which saved name maps to which player based on existing classification
+      // For simplicity, just pre-fill player 1 with the first saved name
+      const savedNames = [names.top_player, names.bottom_player].filter(Boolean);
+      if (savedNames[0] && player1Input) player1Input.value = savedNames[0];
+      if (savedNames[1] && player2Input) player2Input.value = savedNames[1];
+      if (renderTop) renderTop.value = names.top_player;
       if (renderBottom) renderBottom.value = names.bottom_player;
     }
   } catch (_) { /* player names not yet saved */ }
 })();
 
 document.getElementById("save-player-names")?.addEventListener("click", async () => {
-  const topName = document.getElementById("top-player-name")?.value?.trim() || "";
-  const bottomName = document.getElementById("bottom-player-name")?.value?.trim() || "";
-  if (!topName && !bottomName) return;
+  const player1Name = document.getElementById("player-one-name")?.value?.trim() || "";
+  const player2Name = document.getElementById("player-two-name")?.value?.trim() || "";
+  if (!player1Name && !player2Name) return;
   const status = document.getElementById("player-id-status");
+
+  // Count which role was tagged as which player
+  const cards = document.querySelectorAll("#player-id-grid .player-id-card");
+  let votes1top = 0, votes1bottom = 0, votes2top = 0, votes2bottom = 0;
+  for (const card of cards) {
+    const role = card.dataset.role;
+    const selected = card.dataset.selected;
+    if (selected === "1") {
+      if (role === "top_player") votes1top++; else votes1bottom++;
+    } else if (selected === "2") {
+      if (role === "top_player") votes2top++; else votes2bottom++;
+    }
+  }
+
+  // Map: the role with more Player 1 votes gets the player 1 name
+  let topName = "", bottomName = "";
+  if (player1Name) {
+    if (votes1top >= votes1bottom) {
+      topName = player1Name;
+      bottomName = player2Name;
+    } else {
+      topName = player2Name;
+      bottomName = player1Name;
+    }
+  }
+
   status.textContent = "Saving…";
   try {
     const resp = await fetch("/api/jobs/{{ job.public_id }}/player-names", {

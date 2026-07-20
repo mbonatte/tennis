@@ -445,6 +445,40 @@ def _require_aligned(name: str, results: list, frame_count: int) -> None:
         raise VideoProcessingError(f"{name} produced {len(results)} results for {frame_count} source frames")
 
 
+def _infer_frame_size(player_tracks: list[list]) -> tuple[int, int]:
+    """Estimate frame dimensions from the maximum bbox coordinates across all tracks."""
+    max_w = 0
+    max_h = 0
+    for frame_players in player_tracks:
+        for player in frame_players:
+            bbox = player.get("bbox") if isinstance(player, dict) else getattr(player, "bbox", None)
+            if bbox is not None:
+                max_w = max(max_w, bbox[2])
+                max_h = max(max_h, bbox[3])
+    return max(max_h, 1), max(max_w, 1)
+
+
+def _person_like_bbox(bbox, frame_h: int | None = None, role: str | None = None) -> bool:
+    """Check that a bounding box looks like a real person detection.
+
+    Filters out stale/held tracking boxes and non-person detections.
+    """
+    x1, y1, x2, y2 = bbox
+    width = x2 - x1
+    height = y2 - y1
+    if width <= 0 or height <= 0:
+        return False
+    if height <= width:
+        return False
+    if frame_h is not None and height > frame_h * 0.55:
+        return False
+    if frame_h is not None and role == "top_player" and y2 > frame_h * 0.55:
+        return False
+    if frame_h is not None and role == "bottom_player" and y1 < frame_h * 0.05:
+        return False
+    return True
+
+
 def pick_representative_players(player_tracks: list[list]) -> dict:
     """Find a single frame where both players are visible with good confidence.
 
@@ -453,6 +487,9 @@ def pick_representative_players(player_tracks: list[list]) -> dict:
     'top' in one frame and 'bottom' in another after a camera-angle change.
     A single frame ensures the user sees both players together in context.
     """
+
+    frame_h, frame_w = _infer_frame_size(player_tracks)
+
     best_frame = -1
     best_score = -1.0
     best_top_bbox = None
@@ -471,6 +508,10 @@ def pick_representative_players(player_tracks: list[list]) -> dict:
             role = player.get("role") if isinstance(player, dict) else getattr(player, "role", "")
             area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
             score = float(conf) * min(area / 50000.0, 1.0)
+
+            if not _person_like_bbox(bbox, frame_h, role):
+                continue
+
             if role == "top_player" and score > top_conf:
                 top_bbox, top_conf = list(map(int, bbox)), score
             elif role == "bottom_player" and score > bottom_conf:
@@ -488,6 +529,50 @@ def pick_representative_players(player_tracks: list[list]) -> dict:
     if best_frame >= 0:
         result["top_player"] = {"frame": best_frame, "bbox": best_top_bbox}
         result["bottom_player"] = {"frame": best_frame, "bbox": best_bottom_bbox}
+    return result
+
+
+def pick_representative_frames(player_tracks: list[list], n: int = 3) -> list[dict]:
+    """Find up to *n* frames where both players are visible with good confidence.
+
+    Returns a list of dicts sorted by descending quality, each with shape::
+
+        {"frame": int, "top_player": {"bbox": [...]}, "bottom_player": {"bbox": [...]}}
+    """
+    frame_h, _frame_w = _infer_frame_size(player_tracks)
+    scored = []
+
+    for frame_idx, players in enumerate(player_tracks):
+        top_bbox = None
+        top_conf = 0.0
+        bottom_bbox = None
+        bottom_conf = 0.0
+        for player in players:
+            bbox = player.get("bbox") if isinstance(player, dict) else getattr(player, "bbox", None)
+            conf = player.get("conf") if isinstance(player, dict) else getattr(player, "conf", 0.0)
+            if bbox is None:
+                continue
+            role = player.get("role") if isinstance(player, dict) else getattr(player, "role", "")
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            score = float(conf) * min(area / 50000.0, 1.0)
+            if role == "top_player" and score > top_conf:
+                if _person_like_bbox(bbox, frame_h, role):
+                    top_bbox, top_conf = list(map(int, bbox)), score
+            elif role == "bottom_player" and score > bottom_conf:
+                if _person_like_bbox(bbox, frame_h, role):
+                    bottom_bbox, bottom_conf = list(map(int, bbox)), score
+        if top_bbox is not None and bottom_bbox is not None:
+            scored.append((top_conf + bottom_conf, frame_idx, top_bbox, bottom_bbox))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    result = []
+    for _score, frame_idx, top_bbox, bottom_bbox in scored[:n]:
+        result.append({
+            "frame": frame_idx,
+            "top_player": {"bbox": top_bbox},
+            "bottom_player": {"bbox": bottom_bbox},
+        })
     return result
 
 
@@ -638,6 +723,7 @@ def analyze_video(
 
     _cancelled(cancellation_check)
     player_appearance = pick_representative_players(player_tracks) if analysis.player_tracking else {}
+    player_appearance_samples = pick_representative_frames(player_tracks) if analysis.player_tracking else []
 
     bounces: set[int] = set()
     if analysis.bounce_detection:
@@ -713,6 +799,7 @@ def analyze_video(
             "court_keypoints": keypoints,
             "player_tracks": player_tracks,
             "player_appearance": player_appearance,
+            "player_appearance_samples": player_appearance_samples,
             "player_names": {},
             "bounces": sorted(bounces),
             "shots": shots,

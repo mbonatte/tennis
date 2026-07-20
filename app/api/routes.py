@@ -34,7 +34,7 @@ from tennis_analyzer.pipeline.court_calibration import (
     create_static_calibration,
     suggested_outer_corners,
 )
-from tennis_analyzer.pipeline.service import pick_representative_players, recompute_court_dependent_events
+from tennis_analyzer.pipeline.service import pick_representative_frames, pick_representative_players, recompute_court_dependent_events
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
 from tennis_analyzer.scoring import PointRecord, score_match
 from tennis_analyzer.video import probe_video, validate_video
@@ -708,6 +708,7 @@ def get_player_names(
     return {
         "player_names": artifact.get("player_names", {}),
         "player_appearance": artifact.get("player_appearance", {}),
+        "player_appearance_samples": artifact.get("player_appearance_samples", []),
     }
 
 
@@ -724,9 +725,11 @@ def recompute_player_crops(
     appearance = pick_representative_players(player_tracks)
     if not appearance:
         raise HTTPException(422, "Could not find a frame with both players detected")
+    samples = pick_representative_frames(player_tracks)
     artifact["player_appearance"] = appearance
+    artifact["player_appearance_samples"] = samples
     write_artifact(artifact_path, {k: v for k, v in artifact.items() if k != "schema_version"})
-    return {"player_appearance": appearance}
+    return {"player_appearance": appearance, "player_appearance_samples": samples}
 
 
 @router.post("/api/jobs/{public_id}/player-names")
@@ -751,6 +754,7 @@ def save_player_names(
 def player_crop_image(
     public_id: str,
     role: str,
+    sample: int = 0,
     db: Session = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> Response:
@@ -761,11 +765,19 @@ def player_crop_image(
         artifact = read_artifact(resolve_job_file(settings.data_root, job.analysis_artifact_relative_path))
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         raise HTTPException(500, "Saved analysis artifact is unavailable") from exc
-    appearance = artifact.get("player_appearance", {}).get(role)
-    if not appearance:
-        raise HTTPException(404, "No representative frame recorded for this player")
-    frame_idx = appearance["frame"]
-    bbox = appearance["bbox"]
+
+    samples = artifact.get("player_appearance_samples", [])
+    if sample > 0 and sample < len(samples):
+        sample_data = samples[sample]
+        frame_idx = sample_data["frame"]
+        bbox = sample_data[role]["bbox"]
+    else:
+        appearance = artifact.get("player_appearance", {}).get(role)
+        if not appearance:
+            raise HTTPException(404, "No representative frame recorded for this player")
+        frame_idx = appearance["frame"]
+        bbox = appearance["bbox"]
+
     cap = cv2.VideoCapture(str(resolve_job_file(settings.data_root, job.input_relative_path)))
     try:
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
@@ -774,13 +786,17 @@ def player_crop_image(
         cap.release()
     if not ok:
         raise HTTPException(422, "Could not read the representative frame from the source video")
+
     x1, y1, x2, y2 = map(int, bbox)
-    margin = 20
+    box_w = max(1, x2 - x1)
+    box_h = max(1, y2 - y1)
+    margin_x = max(30, int(box_w * 0.25))
+    margin_y = max(30, int(box_h * 0.25))
     h, w = frame.shape[:2]
-    x1 = max(0, x1 - margin)
-    y1 = max(0, y1 - margin)
-    x2 = min(w, x2 + margin)
-    y2 = min(h, y2 + margin)
+    x1 = max(0, x1 - margin_x)
+    y1 = max(0, y1 - margin_y)
+    x2 = min(w, x2 + margin_x)
+    y2 = min(h, y2 + margin_y)
     crop = frame[y1:y2, x1:x2]
     crop_h, crop_w = crop.shape[:2]
     if crop_w > 320 or crop_h > 320:

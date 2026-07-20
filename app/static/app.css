@@ -2081,6 +2081,41 @@ a.point-btn {
     border-radius: .375rem;
     text-align: center;
 }
+.player-id-names {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.player-id-toggle {
+    display: flex;
+    gap: .5rem;
+    justify-content: center;
+}
+.tag-btn {
+    flex: 1;
+    padding: .35rem .5rem;
+    border: 1px solid #bcc9bc;
+    border-radius: .375rem;
+    background: #fff;
+    cursor: pointer;
+    font-size: .8rem;
+    color: #34483c;
+    transition: background .15s, border-color .15s;
+}
+.tag-btn:hover {
+    background: #e8efe8;
+}
+.tag-btn.active {
+    color: #fff;
+    border-color: transparent;
+}
+.tag-btn.tag-p1.active {
+    background: #2b6e4f;
+}
+.tag-btn.tag-p2.active {
+    background: #b8723a;
+}
 .player-label-crop {
     display: flex;
     flex-direction: column;
@@ -2098,6 +2133,7 @@ a.point-btn {
 }
 @media (max-width: 600px) {
     .player-id-grid { grid-template-columns: 1fr; }
+    .player-id-names { grid-template-columns: 1fr; }
 }
 
 
