@@ -2042,4 +2042,62 @@ a.point-btn {
     }
 }
 
+/* Player identification */
+.player-id-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+}
+.player-id-card {
+    background: #f0f3f0;
+    border-radius: .5rem;
+    padding: 1rem;
+    text-align: center;
+}
+.player-crop {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    border-radius: .375rem;
+    margin-bottom: .75rem;
+    background: #dce3dc;
+    min-height: 80px;
+    object-fit: contain;
+}
+.player-id-field {
+    display: flex;
+    flex-direction: column;
+    gap: .3rem;
+}
+.player-id-field label {
+    font-size: .85rem;
+    color: #34483c;
+}
+.player-name-input {
+    font-size: 1rem;
+    padding: .45rem .6rem;
+    border: 1px solid #c6d0c6;
+    border-radius: .375rem;
+    text-align: center;
+}
+.player-label-crop {
+    display: flex;
+    flex-direction: column;
+    gap: .25rem;
+    align-items: center;
+}
+.crop-thumb {
+    width: 100%;
+    max-width: 160px;
+    height: auto;
+    border-radius: .25rem;
+    background: #dce3dc;
+    min-height: 40px;
+    object-fit: contain;
+}
+@media (max-width: 600px) {
+    .player-id-grid { grid-template-columns: 1fr; }
+}
+
 

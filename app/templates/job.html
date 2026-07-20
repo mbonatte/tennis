@@ -256,6 +256,36 @@
 
     {% if job.analysis_artifact_relative_path %}
       {% set visual = job.submitted_options.get('visualization', {}) %}
+
+      <section class="card section" id="player-identification">
+        <div class="section-title">
+          <div>
+            <h2>Player identification</h2>
+            <p>Name the players once. The names are saved with the analysis and reused in every render.</p>
+          </div>
+        </div>
+        <div class="player-id-grid" id="player-id-grid">
+          <div class="player-id-card">
+            <img id="top-player-crop" class="player-crop" src="/jobs/{{ job.public_id }}/player-crops/top_player.jpg" alt="Far player" loading="lazy">
+            <div class="player-id-field">
+              <label for="top-player-name">Far player</label>
+              <input type="text" id="top-player-name" class="player-name-input" maxlength="40" placeholder="e.g. Nadal">
+            </div>
+          </div>
+          <div class="player-id-card">
+            <img id="bottom-player-crop" class="player-crop" src="/jobs/{{ job.public_id }}/player-crops/bottom_player.jpg" alt="Near player" loading="lazy">
+            <div class="player-id-field">
+              <label for="bottom-player-name">Near player</label>
+              <input type="text" id="bottom-player-name" class="player-name-input" maxlength="40" placeholder="e.g. Federer">
+            </div>
+          </div>
+        </div>
+        <div class="form-footer">
+          <span id="player-id-status" class="notice"></span>
+          <button id="save-player-names" type="button">Save player names</button>
+        </div>
+      </section>
+
       <section class="card render-studio" id="render-studio">
         <div class="section-heading">
           <div>
@@ -330,8 +360,14 @@
                 <legend>Player labels</legend>
                 <div class="inline-fields" data-depends-on="player_boxes">
                   <label>Box color <input type="color" name="player_box_color" value="{{ visual.get('player_box_color', '#28c850') }}"></label>
-                  <label>Far player <input type="text" name="top_player_label" value="{{ visual.get('top_player_label', 'Top player') }}" maxlength="40"></label>
-                  <label>Near player <input type="text" name="bottom_player_label" value="{{ visual.get('bottom_player_label', 'Bottom player') }}" maxlength="40"></label>
+                  <label class="player-label-crop">
+                    <img class="crop-thumb" src="/jobs/{{ job.public_id }}/player-crops/top_player.jpg" alt="" loading="lazy">
+                    Far player <input type="text" name="top_player_label" id="render-top-label" maxlength="40">
+                  </label>
+                  <label class="player-label-crop">
+                    <img class="crop-thumb" src="/jobs/{{ job.public_id }}/player-crops/bottom_player.jpg" alt="" loading="lazy">
+                    Near player <input type="text" name="bottom_player_label" id="render-bottom-label" maxlength="40">
+                  </label>
                 </div>
               </fieldset>
             </div>
@@ -699,6 +735,52 @@ function selectPointForRender(startFrame, endFrame) {
   select.dispatchEvent(new Event("change", { bubbles: true }));
   document.getElementById("render-studio")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
+
+(async function loadPlayerNames() {
+  const topInput = document.getElementById("top-player-name");
+  const bottomInput = document.getElementById("bottom-player-name");
+  const renderTop = document.getElementById("render-top-label");
+  const renderBottom = document.getElementById("render-bottom-label");
+  if (!topInput && !bottomInput) return;
+  try {
+    const resp = await fetch("/api/jobs/{{ job.public_id }}/player-names");
+    if (!resp.ok) throw new Error();
+    const data = await resp.json();
+    const names = data.player_names || {};
+    if (names.top_player) {
+      if (topInput) topInput.value = names.top_player;
+      if (renderTop) renderTop.value = names.top_player;
+    }
+    if (names.bottom_player) {
+      if (bottomInput) bottomInput.value = names.bottom_player;
+      if (renderBottom) renderBottom.value = names.bottom_player;
+    }
+  } catch (_) { /* player names not yet saved */ }
+})();
+
+document.getElementById("save-player-names")?.addEventListener("click", async () => {
+  const topName = document.getElementById("top-player-name")?.value?.trim() || "";
+  const bottomName = document.getElementById("bottom-player-name")?.value?.trim() || "";
+  if (!topName && !bottomName) return;
+  const status = document.getElementById("player-id-status");
+  status.textContent = "Saving…";
+  try {
+    const resp = await fetch("/api/jobs/{{ job.public_id }}/player-names", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ player_names: { top_player: topName, bottom_player: bottomName } }),
+    });
+    if (!resp.ok) throw new Error();
+    const renderTop = document.getElementById("render-top-label");
+    const renderBottom = document.getElementById("render-bottom-label");
+    if (renderTop) renderTop.value = topName;
+    if (renderBottom) renderBottom.value = bottomName;
+    status.textContent = "Names saved! They will be pre-filled for all future renders.";
+    setTimeout(() => { status.textContent = ""; }, 4000);
+  } catch (_) {
+    status.textContent = "Could not save. Please try again.";
+  }
+});
 
 {% if job.status.value == 'completed' and result and result.scorecard %}
   {% for point in result.scorecard.points %}

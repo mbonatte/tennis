@@ -197,6 +197,15 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
     ]
     keypoints = artifact.get("court_keypoints", [])
     player_tracks = artifact.get("player_tracks", [])
+    player_names_from_artifact = artifact.get("player_names", {})
+    if not visual.top_player_label.strip() or visual.top_player_label == "Top player":
+        top_label = player_names_from_artifact.get("top_player", "").strip() or visual.top_player_label
+    else:
+        top_label = visual.top_player_label
+    if not visual.bottom_player_label.strip() or visual.bottom_player_label == "Bottom player":
+        bottom_label = player_names_from_artifact.get("bottom_player", "").strip() or visual.bottom_player_label
+    else:
+        bottom_label = visual.bottom_player_label
     summary = artifact.get("summary", {})
     scorecard = artifact.get("scorecard", {})
     if court_calibration:
@@ -253,8 +262,8 @@ def render_from_artifact(source, artifact_path, destination, visual, progress_ca
                         player_tracks[index],
                         visual.player_boxes,
                         visual.player_poses,
-                        visual.top_player_label,
-                        visual.bottom_player_label,
+                        top_label,
+                        bottom_label,
                         visual.bgr_color("player_box_color"),
                     )
                 if visual.statistics_overlay:
@@ -436,6 +445,52 @@ def _require_aligned(name: str, results: list, frame_count: int) -> None:
         raise VideoProcessingError(f"{name} produced {len(results)} results for {frame_count} source frames")
 
 
+def pick_representative_players(player_tracks: list[list]) -> dict:
+    """Find a single frame where both players are visible with good confidence.
+
+    Picking one frame avoids the problem of position-based role assignment
+    (top/bottom by y-coordinate) where the same real person could be labelled
+    'top' in one frame and 'bottom' in another after a camera-angle change.
+    A single frame ensures the user sees both players together in context.
+    """
+    best_frame = -1
+    best_score = -1.0
+    best_top_bbox = None
+    best_bottom_bbox = None
+
+    for frame_idx, players in enumerate(player_tracks):
+        top_bbox = None
+        top_conf = 0.0
+        bottom_bbox = None
+        bottom_conf = 0.0
+        for player in players:
+            bbox = player.get("bbox") if isinstance(player, dict) else getattr(player, "bbox", None)
+            conf = player.get("conf") if isinstance(player, dict) else getattr(player, "conf", 0.0)
+            if bbox is None:
+                continue
+            role = player.get("role") if isinstance(player, dict) else getattr(player, "role", "")
+            area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
+            score = float(conf) * min(area / 50000.0, 1.0)
+            if role == "top_player" and score > top_conf:
+                top_bbox, top_conf = list(map(int, bbox)), score
+            elif role == "bottom_player" and score > bottom_conf:
+                bottom_bbox, bottom_conf = list(map(int, bbox)), score
+
+        if top_bbox is not None and bottom_bbox is not None:
+            combined = top_conf + bottom_conf
+            if combined > best_score:
+                best_score = combined
+                best_frame = frame_idx
+                best_top_bbox = top_bbox
+                best_bottom_bbox = bottom_bbox
+
+    result = {}
+    if best_frame >= 0:
+        result["top_player"] = {"frame": best_frame, "bbox": best_top_bbox}
+        result["bottom_player"] = {"frame": best_frame, "bbox": best_bottom_bbox}
+    return result
+
+
 def analyze_video(
     input_path: Path | str,
     output_dir: Path | str,
@@ -582,6 +637,8 @@ def analyze_video(
         player_tracks = stabilize_player_roles(player_tracks, (metadata.height, metadata.width))
 
     _cancelled(cancellation_check)
+    player_appearance = pick_representative_players(player_tracks) if analysis.player_tracking else {}
+
     bounces: set[int] = set()
     if analysis.bounce_detection:
         detector = factories.bounce(models.bounce)
@@ -655,6 +712,8 @@ def analyze_video(
             "homographies": homographies,
             "court_keypoints": keypoints,
             "player_tracks": player_tracks,
+            "player_appearance": player_appearance,
+            "player_names": {},
             "bounces": sorted(bounces),
             "shots": shots,
             "bounce_events": bounce_events,

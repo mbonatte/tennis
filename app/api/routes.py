@@ -34,7 +34,7 @@ from tennis_analyzer.pipeline.court_calibration import (
     create_static_calibration,
     suggested_outer_corners,
 )
-from tennis_analyzer.pipeline.service import recompute_court_dependent_events
+from tennis_analyzer.pipeline.service import pick_representative_players, recompute_court_dependent_events
 from tennis_analyzer.schemas import AnalysisOptions, VisualizationOptions
 from tennis_analyzer.scoring import PointRecord, score_match
 from tennis_analyzer.video import probe_video, validate_video
@@ -692,6 +692,105 @@ def point_video(
     if result_path.parent not in path.parents or not path.is_file():
         raise HTTPException(404, "Point video not found")
     return _range_response(path, request.headers.get("range"), "video/mp4")
+
+
+@router.get("/api/jobs/{public_id}/player-names")
+def get_player_names(
+    public_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    try:
+        artifact = read_artifact(resolve_job_file(settings.data_root, job.analysis_artifact_relative_path))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, "Saved analysis artifact is unavailable") from exc
+    return {
+        "player_names": artifact.get("player_names", {}),
+        "player_appearance": artifact.get("player_appearance", {}),
+    }
+
+
+@router.post("/api/jobs/{public_id}/recompute-player-crops")
+def recompute_player_crops(
+    public_id: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    artifact_path = resolve_job_file(settings.data_root, job.analysis_artifact_relative_path)
+    artifact = read_artifact(artifact_path)
+    player_tracks = artifact.get("player_tracks", [])
+    appearance = pick_representative_players(player_tracks)
+    if not appearance:
+        raise HTTPException(422, "Could not find a frame with both players detected")
+    artifact["player_appearance"] = appearance
+    write_artifact(artifact_path, {k: v for k, v in artifact.items() if k != "schema_version"})
+    return {"player_appearance": appearance}
+
+
+@router.post("/api/jobs/{public_id}/player-names")
+def save_player_names(
+    public_id: str,
+    body: dict,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    job = _calibratable_job(db, public_id)
+    artifact_path = resolve_job_file(settings.data_root, job.analysis_artifact_relative_path)
+    artifact = read_artifact(artifact_path)
+    names = {k: v.strip() for k, v in body.get("player_names", {}).items() if isinstance(v, str)}
+    if not names:
+        raise HTTPException(422, "No valid player names provided")
+    artifact["player_names"] = names
+    write_artifact(artifact_path, {k: v for k, v in artifact.items() if k != "schema_version"})
+    return {"player_names": names}
+
+
+@router.get("/jobs/{public_id}/player-crops/{role}.jpg")
+def player_crop_image(
+    public_id: str,
+    role: str,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if role not in ("top_player", "bottom_player"):
+        raise HTTPException(422, "Role must be 'top_player' or 'bottom_player'")
+    job = _calibratable_job(db, public_id)
+    try:
+        artifact = read_artifact(resolve_job_file(settings.data_root, job.analysis_artifact_relative_path))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(500, "Saved analysis artifact is unavailable") from exc
+    appearance = artifact.get("player_appearance", {}).get(role)
+    if not appearance:
+        raise HTTPException(404, "No representative frame recorded for this player")
+    frame_idx = appearance["frame"]
+    bbox = appearance["bbox"]
+    cap = cv2.VideoCapture(str(resolve_job_file(settings.data_root, job.input_relative_path)))
+    try:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ok, frame = cap.read()
+    finally:
+        cap.release()
+    if not ok:
+        raise HTTPException(422, "Could not read the representative frame from the source video")
+    x1, y1, x2, y2 = map(int, bbox)
+    margin = 20
+    h, w = frame.shape[:2]
+    x1 = max(0, x1 - margin)
+    y1 = max(0, y1 - margin)
+    x2 = min(w, x2 + margin)
+    y2 = min(h, y2 + margin)
+    crop = frame[y1:y2, x1:x2]
+    crop_h, crop_w = crop.shape[:2]
+    if crop_w > 320 or crop_h > 320:
+        scale = min(320.0 / max(crop_w, 1), 320.0 / max(crop_h, 1))
+        new_w, new_h = int(crop_w * scale), int(crop_h * scale)
+        crop = cv2.resize(crop, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    ok, encoded = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    if not ok:
+        raise HTTPException(500, "Could not encode the player crop image")
+    return Response(encoded.tobytes(), media_type="image/jpeg", headers={"Cache-Control": "max-age=3600"})
 
 
 def _range_response(path: Path, range_header: str | None, media_type: str):
