@@ -29,8 +29,15 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/></svg>
           {% endif %}
         </div>
-        <div class="step-title">{{ row.label }}</div>
-        <div class="step-status step-status-{{ row.status }}">{{ row.status|capitalize }}</div>
+        <div class="step-body">
+          <div class="step-title">{{ row.label }}</div>
+          <div class="step-meta">
+            <span class="step-status step-status-{{ row.status }}">{{ row.status|capitalize }}</span>
+            {% if row.duration_seconds is not none %}
+              <span class="step-duration">{{ format_duration(row.duration_seconds) }}</span>
+            {% endif %}
+          </div>
+        </div>
       </div>
       {% endfor %}
     {% else %}

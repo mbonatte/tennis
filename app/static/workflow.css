@@ -3,3 +3,6 @@
 .workflow-table{min-width:660px}.workflow-table progress{margin:0;height:.55rem}.workflow-table tr.workflow-running{background:#f1f8f3}.workflow-table tr.workflow-completed .workflow-state{color:#167146}.workflow-table tr.workflow-failed .workflow-state,.workflow-table tr.workflow-cancelled .workflow-state{color:#a32222}.workflow-state{text-transform:capitalize;font-weight:700;font-size:.9rem}
 .workflow-options{display:flex;flex-wrap:wrap;gap:.25rem;margin-top:.35rem}.workflow-options span{background:#eef3ef;border-radius:99px;color:#496356;font-size:.75rem;padding:.1rem .4rem}.stage-progress{display:flex;align-items:center;gap:.5rem;min-width:150px}.stage-progress progress{flex:1}.stage-progress span{font-size:.8rem;color:#627168;min-width:2.5rem}
 @media(max-width:700px){.workflow-heading{align-items:flex-start;flex-direction:column;gap:.25rem}}
+.step-body{display:flex;flex-direction:column;gap:.15rem}
+.step-meta{display:flex;align-items:center;gap:.6rem;font-size:.8rem}
+.step-duration{color:var(--text-secondary)}.step-duration::before{content:"("}.step-duration::after{content:")"}
