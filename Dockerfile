@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
-FROM python:3.11.11-slim-bookworm
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+FROM pytorch/pytorch:2.8.0-cuda12.6-cudnn9-runtime
+ARG TORCH_INDEX_URL
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libglib2.0-0 libgl1 tini && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 tennis && useradd --uid 10001 --gid tennis --create-home tennis
