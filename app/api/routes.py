@@ -27,7 +27,7 @@ from app.services.storage import delete_job_files, resolve_job_file, safe_job_di
 from app.services.workflow import create_workflow, format_duration
 from app.services.workflow import workflow_rows as get_workflow_rows
 from tennis_analyzer.errors import InvalidVideoError, VideoProcessingError
-from tennis_analyzer.pipeline.artifact import read_artifact
+from tennis_analyzer.pipeline.artifact import read_artifact, write_artifact
 from tennis_analyzer.pipeline.court_calibration import (
     CORNER_LABELS,
     CourtCalibrationError,
@@ -43,6 +43,36 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 templates.env.globals["workflow_rows"] = lambda workflow: get_workflow_rows(workflow, datetime.now(UTC))
 templates.env.globals["format_duration"] = format_duration
+
+
+def render_label(render: RenderOutput, point_scenes: list[dict]) -> str:
+    opts = render.visualization_options or {}
+    start = opts.get("scene_start_frame")
+    end = opts.get("scene_end_frame")
+    if start is None and end is None:
+        return "Full video"
+    for scene in point_scenes:
+        if scene.get("start_frame") == start and scene.get("end_frame") == end:
+            sid = scene.get("id", "")
+            if sid.startswith("point-"):
+                return f"Point {sid.removeprefix('point-')}"
+            return sid.replace("-", " ").title()
+    return f"Frames {start}\u2013{end}"
+
+
+def matching_render(scene: dict, renders: list[RenderOutput]) -> RenderOutput | None:
+    """Return the newest completed render matching a point scene, or None."""
+    completed = [
+        r for r in renders
+        if r.status == JobStatus.completed
+        and (r.visualization_options or {}).get("scene_start_frame") == scene.get("start_frame")
+        and (r.visualization_options or {}).get("scene_end_frame") == scene.get("end_frame")
+    ]
+    return max(completed, key=lambda r: r.created_at) if completed else None
+
+
+templates.env.globals["render_label"] = render_label
+templates.env.globals["matching_render"] = matching_render
 logger = logging.getLogger(__name__)
 
 
@@ -507,7 +537,8 @@ def override_point(
         raise HTTPException(404, "Point not found")
     point = dict(points[point_index - 1])
     overrides = dict(point.get("user_overrides") or {})
-    for name, value in payload.model_dump(exclude_none=True).items():
+    for name in payload.model_fields_set:
+        value = getattr(payload, name)
         if name in {"winner", "server"} and value not in {"top_player", "bottom_player", None}:
             raise HTTPException(422, f"Invalid {name}")
         overrides[name] = value

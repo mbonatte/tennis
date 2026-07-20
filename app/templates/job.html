@@ -223,12 +223,19 @@
             {% set start_mm = '%02d:%02d'|format((start_sec / 60)|int, (start_sec % 60)|int) %}
             {% set end_mm = '%02d:%02d'|format((end_sec / 60)|int, (end_sec % 60)|int) %}
 
-            <article class="point-card" data-point-index="{{ idx }}">
+            {% set render = matching_render(scene, job.renders) %}
+            <article class="point-card" id="preview-{{ idx }}" data-point-index="{{ idx }}" data-start-frame="{{ scene.start_frame }}" data-end-frame="{{ scene.end_frame }}">
               <div class="point-top">
                 <strong>● {{ scene.id.replace('point-', 'Point ').replace('-', ' ') }}</strong>
                 <span>{{ start_mm }}–{{ end_mm }}</span>
               </div>
-              <div class="thumb"></div>
+              {% if render %}
+                <video class="thumb thumb-video" src="/jobs/{{ job.public_id }}/renders/{{ render.public_id }}/video" autoplay muted loop playsinline preload="metadata"></video>
+              {% else %}
+                <div class="thumb">
+                  <canvas class="preview-canvas" hidden></canvas>
+                </div>
+              {% endif %}
               <div class="point-stats">
                 <span>Shots</span><strong>{{ point_shots|length }}</strong>
                 <span>Bounces</span><strong>{{ point_bounces|length }}</strong>
@@ -236,7 +243,11 @@
                   <span>Score</span><strong>{{ sp.score_after.top_player if sp.score_after else '—' }}–{{ sp.score_after.bottom_player if sp.score_after else '—' }}</strong>
                 {% endif %}
               </div>
-              <button class="point-btn" onclick="selectPointForRender({{ scene.start_frame }}, {{ scene.end_frame }})">Create this clip</button>
+              {% if render %}
+                <a class="point-btn" href="/jobs/{{ job.public_id }}/renders/{{ render.public_id }}/video">Watch clip</a>
+              {% else %}
+                <button class="point-btn" onclick="selectPointForRender({{ scene.start_frame }}, {{ scene.end_frame }})">Create this clip</button>
+              {% endif %}
             </article>
           {% endfor %}
         </div>
@@ -365,7 +376,8 @@
               {% for render in job.renders|sort(attribute='created_at', reverse=true) %}
                 <article class="render-item" id="render-{{ render.public_id }}">
                   <div>
-                    <strong>{{ render.created_at }}</strong>
+                    <strong>{{ render_label(render, point_scenes) }}</strong>
+                    <span class="timestamp">{{ render.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
                     <div class="chips">
                       {% for name, value in render.visualization_options.items() %}
                         {% if value and name not in ['top_player_label', 'bottom_player_label', 'scene_start_frame', 'scene_end_frame'] %}<span>{{ name.replace('_', ' ') }}</span>{% endif %}
@@ -402,7 +414,7 @@
                       <td>{{ point.point_index }}</td>
                       <td><select data-point-winner="{{ point.point_index }}"><option value="" {% if not point.winner %}selected{% endif %}>Unknown</option><option value="top_player" {% if point.winner == 'top_player' %}selected{% endif %}>Far player</option><option value="bottom_player" {% if point.winner == 'bottom_player' %}selected{% endif %}>Near player</option></select></td>
                       <td>{{ point.server|replace('_', ' ') if point.server else 'unknown' }}</td>
-                      <td>{{ point.score_after.top_player }}–{{ point.score_after.bottom_player }}</td>
+                      <td data-score-after="{{ point.point_index }}">{{ point.score_after.top_player }}–{{ point.score_after.bottom_player }}</td>
                       <td><button type="button" class="secondary" data-save-point="{{ point.point_index }}">Save</button></td>
                     </tr>
                   {% endfor %}
@@ -562,12 +574,12 @@
     status.textContent = response.ok
       ? `Court correction saved. Recomputed ${data.bounce_count || 0} court-dependent bounces.`
       : (data.detail || "Could not save correction.");
-    if (response.ok) window.setTimeout(() => location.reload(), 800);
   });
 
   document.getElementById("clear-court-calibration")?.addEventListener("click", async () => {
     await fetch(`/api/jobs/${jobId}/court-calibration`, { method: "DELETE" });
-    location.reload();
+    document.getElementById("court-calibration-status").textContent = "Court calibration removed.";
+    document.getElementById("clear-court-calibration")?.remove();
   });
 })();
 </script>
@@ -652,36 +664,33 @@ const jobId = "{{ job.public_id }}";
 async function loadPointPreview(idx, startFrame, endFrame) {
   const root = document.querySelector(`#preview-${idx}`);
   if (!root) return;
+  const canvas = root.querySelector(".preview-canvas");
+  if (!canvas) return;
   const thumb = root.querySelector(".thumb");
-  const button = root.querySelector(".preview-btn");
-  const wrapper = root.querySelector(".preview-canvas-wrapper");
-  const canvas = wrapper.querySelector(".preview-canvas");
-  const label = button.querySelector("span:last-child");
-  if (thumb) thumb.style.display = "none";
-  label.textContent = "Loading preview…";
-  button.disabled = true;
-
   try {
     const response = await fetch(`/jobs/${jobId}/court-preview.jpg?frame_index=${Math.floor((startFrame + endFrame) / 2)}&cache=${Date.now()}`);
     if (!response.ok) throw new Error();
-    const url = URL.createObjectURL(await response.blob());
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
     const image = new Image();
     image.onload = () => {
-      wrapper.hidden = false;
-      button.hidden = true;
       canvas.width = image.naturalWidth;
       canvas.height = image.naturalHeight;
       canvas.getContext("2d").drawImage(image, 0, 0);
+      canvas.hidden = false;
       URL.revokeObjectURL(url);
     };
     image.src = url;
   } catch (_) {
-    label.textContent = "Could not load preview";
-    button.classList.add("is-error");
-  } finally {
-    button.disabled = false;
+    // leave the placeholder visible
   }
 }
+
+{% for scene in point_scenes %}
+  {% if not matching_render(scene, job.renders) %}
+    loadPointPreview({{ loop.index0 }}, {{ scene.start_frame }}, {{ scene.end_frame }});
+  {% endif %}
+{% endfor %}
 
 function selectPointForRender(startFrame, endFrame) {
   const select = document.querySelector("[name=point_scene]");
@@ -694,21 +703,90 @@ function selectPointForRender(startFrame, endFrame) {
 {% if job.status.value == 'completed' and result and result.scorecard %}
   {% for point in result.scorecard.points %}
     document.querySelector('[data-save-point="{{ point.point_index }}"]')?.addEventListener("click", async () => {
+      const btn = document.querySelector('[data-save-point="{{ point.point_index }}"]');
       const winner = document.querySelector('[data-point-winner="{{ point.point_index }}"]').value || null;
+      btn.disabled = true;
+      btn.textContent = "Saving…";
       const response = await fetch('/api/jobs/{{ job.public_id }}/points/{{ point.point_index }}', {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ winner }),
       });
-      if (response.ok) location.reload();
-      else alert("Could not save this correction.");
+      if (response.ok) {
+        const data = await response.json();
+        for (const row of (data.points || [])) {
+          const scoreCell = document.querySelector(`[data-score-after="${row.point_index}"]`);
+          if (scoreCell) scoreCell.textContent = (row.score_after?.top_player || '0') + '\u2013' + (row.score_after?.bottom_player || '0');
+          const gamesCell = document.querySelector(`[data-games-after="${row.point_index}"]`);
+          if (gamesCell) gamesCell.textContent = (row.games?.top_player || '0') + '\u2013' + (row.games?.bottom_player || '0');
+        }
+        const summaryGames = document.querySelector('.metrics :first-child strong');
+        const summarySets = document.querySelector('.metrics :nth-child(2) strong');
+        if (summaryGames) summaryGames.textContent = (data.games?.top_player || '0') + '\u2013' + (data.games?.bottom_player || '0');
+        if (summarySets) summarySets.textContent = (data.sets?.top_player || '0') + '\u2013' + (data.sets?.bottom_player || '0');
+        btn.textContent = "Saved";
+        setTimeout(() => { btn.textContent = "Save"; btn.disabled = false; }, 1500);
+      } else {
+        alert("Could not save this correction.");
+        btn.disabled = false;
+        btn.textContent = "Save";
+      }
     });
   {% endfor %}
 {% endif %}
 
 {% set active_renders = job.renders|selectattr('status.value', 'in', ['queued', 'running'])|list %}
 {% if job.status.value in ['queued', 'running'] or active_renders %}
-  setTimeout(() => location.reload(), 3000);
+  (async function poll() {
+    try {
+      const response = await fetch('/api/jobs/{{ job.public_id }}');
+      if (!response.ok) { setTimeout(poll, 5000); return; }
+      const data = await response.json();
+      let hasActive = false;
+      for (const render of (data.renders || [])) {
+        const el = document.getElementById('render-' + render.id);
+        if (!el) continue;
+        const badge = el.querySelector('.badge');
+        if (badge && badge.textContent !== render.status) badge.textContent = render.status;
+        const progress = el.querySelector('progress');
+        const pct = el.querySelector('.render-state span:last-child');
+        if (progress && render.progress != null) { progress.value = render.progress; }
+        if (pct && render.progress != null) pct.textContent = render.progress + '%';
+        if (render.status === 'queued' || render.status === 'running') { hasActive = true; }
+        if (render.status === 'completed' && render.video) {
+          if (el.querySelector('progress')) el.querySelector('progress').hidden = true;
+          if (el.querySelector('.render-state span:last-child')) el.querySelector('.render-state span:last-child').hidden = true;
+          if (!el.querySelector('.button')) {
+            const link = document.createElement('a');
+            link.className = 'button secondary'; link.href = render.video; link.textContent = 'Watch';
+            el.querySelector('.render-state')?.after(link);
+          }
+          const opts = render.options || {};
+          const start = opts.scene_start_frame;
+          const end = opts.scene_end_frame;
+          if (start != null && end != null) {
+            const card = document.querySelector('.point-card[data-start-frame="' + start + '"][data-end-frame="' + end + '"]');
+            if (card && !card.querySelector('.thumb-video')) {
+              const thumb = card.querySelector('.thumb');
+              if (thumb) {
+                const video = document.createElement('video');
+                video.className = 'thumb thumb-video'; video.src = render.video;
+                video.autoplay = true; video.muted = true; video.loop = true; video.playsInline = true; video.preload = 'metadata';
+                thumb.replaceWith(video);
+              }
+              const btn = card.querySelector('.point-btn');
+              if (btn && btn.tagName === 'BUTTON') {
+                const a = document.createElement('a');
+                a.className = 'point-btn'; a.href = render.video; a.textContent = 'Watch clip';
+                btn.replaceWith(a);
+              }
+            }
+          }
+        }
+      }
+      if (hasActive) setTimeout(poll, 3000);
+    } catch (_) { setTimeout(poll, 5000); }
+  })();
 {% endif %}
 </script>
 {% endblock %}

@@ -1007,6 +1007,7 @@ tbody tr:hover {
   background: #4d72a7;
   clip-path: polygon(14% 0, 86% 0, 100% 100%, 0 100%);
   border: 2px solid rgba(255, 255, 255, 0.75);
+  z-index: 0;
 }
 
 .thumb::after {
@@ -1025,6 +1026,23 @@ tbody tr:hover {
   font-size: 12px;
   padding-left: 2px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  z-index: 0;
+}
+
+.thumb .preview-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 1;
+}
+
+.thumb-video {
+  display: block;
+  width: 100%;
+  height: 92px;
+  border-radius: 9px;
+  object-fit: cover;
 }
 
 .point-stats {
@@ -1056,6 +1074,13 @@ tbody tr:hover {
 
 .point-btn:hover {
   background: var(--green-50);
+}
+
+a.point-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 /* Render studio */
@@ -1408,6 +1433,13 @@ tbody tr:hover {
 
 .render-item .chips {
   margin-top: 0.35rem;
+}
+
+.render-item .timestamp {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-top: 0.15rem;
 }
 
 .render-state {
