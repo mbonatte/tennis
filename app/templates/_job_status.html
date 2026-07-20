@@ -9,15 +9,28 @@
     </div>
     <div class="summary-copy">
       <h1>{{ job.status.value|capitalize }}</h1>
-      <p>{% if job.error_message %}{{ job.error_message }}{% else %}All stages finished successfully.{% endif %}</p>
+      <p>{% if job.error_message %}{{ job.error_message }}{% elif job.status.value == 'running' %}Processing…{% else %}All stages finished successfully.{% endif %}</p>
     </div>
   </div>
+
+  {% if job.status.value in ['queued', 'running'] %}
+  <div id="global-progress" class="global-progress">
+    <div class="global-progress-row">
+      <progress id="global-progress-bar" max="100" value="{{ job.progress }}"></progress>
+      <span id="global-progress-text">{{ job.progress }}%</span>
+    </div>
+    <div class="elapsed-row">
+      <span>Elapsed:</span>
+      <span id="elapsed-time" data-started-at="{{ job.started_at.isoformat() if job.started_at else '' }}">—</span>
+    </div>
+  </div>
+  {% endif %}
 
   <div class="progress" role="list" aria-label="Analysis stages">
     {% set rows = workflow_rows(job.workflow) %}
     {% if rows %}
       {% for row in rows %}
-      <div class="step" role="listitem">
+      <div class="step{% if row.status == 'running' %} step-running{% endif %}" role="listitem" data-stage-key="{{ row.key }}" data-stage-status="{{ row.status }}">
         <div class="step-icon step-{{ row.status }}" aria-hidden="true">
           {% if row.status == 'completed' %}
           <svg class="checkmark" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10" /></svg>
@@ -34,9 +47,15 @@
           <div class="step-meta">
             <span class="step-status step-status-{{ row.status }}">{{ row.status|capitalize }}</span>
             {% if row.duration_seconds is not none %}
-              <span class="step-duration">{{ format_duration(row.duration_seconds) }}</span>
+              <span class="step-duration" data-seconds="{{ row.duration_seconds }}">{{ format_duration(row.duration_seconds) }}</span>
             {% endif %}
           </div>
+          {% if row.status == 'running' %}
+          <div class="stage-progress">
+            <progress max="100" value="{{ row.progress }}"></progress>
+            <span class="stage-pct">{{ row.progress }}%</span>
+          </div>
+          {% endif %}
         </div>
       </div>
       {% endfor %}

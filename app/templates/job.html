@@ -818,12 +818,156 @@ document.getElementById("save-player-names")?.addEventListener("click", async ()
 {% endif %}
 
 {% set active_renders = job.renders|selectattr('status.value', 'in', ['queued', 'running'])|list %}
-{% if job.status.value in ['queued', 'running'] or active_renders %}
-  (async function poll() {
+{% set analysis_active = job.status.value in ['queued', 'running'] %}
+{% if analysis_active or active_renders %}
+{% if analysis_active %}
+const SVG_COMPLETED = '<svg class="checkmark" viewBox="0 0 24 24"><path d="M5 12.5 10 17l9-10" /></svg>';
+const SVG_RUNNING = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>';
+const SVG_FAILED = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+const SVG_PENDING = '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/></svg>';
+
+function stageIcon(status) {
+  switch (status) {
+    case 'completed': return SVG_COMPLETED;
+    case 'running': return SVG_RUNNING;
+    case 'failed': return SVG_FAILED;
+    default: return SVG_PENDING;
+  }
+}
+
+function formatDuration(seconds) {
+  if (seconds == null || seconds < 0) return '\u2014';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}h ${m % 60}m`;
+  }
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function updateWorkflow(data) {
+  const workflow = data.workflow || [];
+
+  if (data.status === 'running' || data.status === 'queued') {
+    let gp = document.getElementById('global-progress');
+    if (!gp) {
+      gp = document.createElement('div');
+      gp.id = 'global-progress';
+      gp.className = 'global-progress';
+      gp.innerHTML = '<div class="global-progress-row"><progress id="global-progress-bar" max="100" value="0"></progress><span id="global-progress-text">0%</span></div><div class="elapsed-row"><span>Elapsed:</span><span id="elapsed-time" data-started-at="">\u2014</span></div>';
+      document.querySelector('#job-status .summary').after(gp);
+    }
+    const bar = document.getElementById('global-progress-bar');
+    const text = document.getElementById('global-progress-text');
+    if (bar) bar.value = data.progress || 0;
+    if (text) text.textContent = (data.progress || 0) + '%';
+    const et = document.getElementById('elapsed-time');
+    if (et && data.started_at) et.dataset.startedAt = data.started_at;
+  } else {
+    const gp = document.getElementById('global-progress');
+    if (gp) gp.remove();
+  }
+
+  for (const stage of workflow) {
+    const el = document.querySelector(`[data-stage-key="${CSS.escape(stage.key)}"]`);
+    if (!el) continue;
+
+    el.dataset.stageStatus = stage.status;
+    el.classList.toggle('step-running', stage.status === 'running');
+
+    const icon = el.querySelector('.step-icon');
+    if (icon) {
+      icon.className = `step-icon step-${stage.status}`;
+      icon.innerHTML = stageIcon(stage.status);
+    }
+
+    const statusEl = el.querySelector('.step-status');
+    if (statusEl) {
+      statusEl.className = `step-status step-status-${stage.status}`;
+      statusEl.textContent = stage.status.charAt(0).toUpperCase() + stage.status.slice(1);
+    }
+
+    const durEl = el.querySelector('.step-duration');
+    if (durEl && stage.duration_seconds != null) {
+      durEl.dataset.seconds = stage.duration_seconds;
+      durEl.textContent = formatDuration(stage.duration_seconds);
+    }
+
+    const body = el.querySelector('.step-body');
+    let progContainer = body ? body.querySelector('.stage-progress') : null;
+    if (stage.status === 'running') {
+      if (!progContainer && body) {
+        progContainer = document.createElement('div');
+        progContainer.className = 'stage-progress';
+        progContainer.innerHTML = '<progress max="100" value="0"></progress><span class="stage-pct">0%</span>';
+        body.appendChild(progContainer);
+      }
+      if (progContainer) {
+        const progBar = progContainer.querySelector('progress');
+        const progText = progContainer.querySelector('.stage-pct');
+        if (progBar) progBar.value = stage.progress;
+        if (progText) progText.textContent = stage.progress + '%';
+      }
+    } else if (progContainer) {
+      progContainer.remove();
+    }
+  }
+
+  const summaryH1 = document.querySelector('#job-status .summary-copy h1');
+  if (summaryH1) summaryH1.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+  const summaryP = document.querySelector('#job-status .summary-copy p');
+  if (summaryP) {
+    if (data.error && data.error.message) {
+      summaryP.textContent = data.error.message;
+    } else if (data.status === 'completed') {
+      summaryP.textContent = 'All stages finished successfully.';
+    } else if (data.status === 'running' || data.status === 'queued') {
+      summaryP.textContent = 'Processing\u2026';
+    }
+  }
+  const summaryIcon = document.querySelector('#job-status .summary-icon');
+  if (summaryIcon) {
+    summaryIcon.innerHTML = data.status === 'completed' ? SVG_COMPLETED : SVG_RUNNING;
+  }
+}
+
+function startElapsedTimer() {
+  if (window.elapsedInterval) clearInterval(window.elapsedInterval);
+  function tick() {
+    const el = document.getElementById('elapsed-time');
+    if (!el) return;
+    const startedAt = el.dataset.startedAt;
+    if (!startedAt) { el.textContent = '\u2014'; return; }
+    const diff = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000);
+    el.textContent = formatDuration(diff);
+  }
+  tick();
+  window.elapsedInterval = setInterval(tick, 1000);
+}
+
+startElapsedTimer();
+{% endif %}
+
+let analysisReloaded = false;
+const analysisWasRunning = {{ 1 if analysis_active else 0 }};
+
+(async function poll() {
     try {
       const response = await fetch('/api/jobs/{{ job.public_id }}');
       if (!response.ok) { setTimeout(poll, 5000); return; }
       const data = await response.json();
+
+      if (analysisWasRunning && !analysisReloaded && data.status !== 'queued' && data.status !== 'running') {
+        analysisReloaded = true;
+        if (window.elapsedInterval) clearInterval(window.elapsedInterval);
+        window.location.reload();
+        return;
+      }
+
+      if (analysisWasRunning) updateWorkflow(data);
+
       let hasActive = false;
       for (const render of (data.renders || [])) {
         const el = document.getElementById('render-' + render.id);
